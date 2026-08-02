@@ -810,7 +810,7 @@ async def _search_download_and_process(
                     language="en",
                     season=season,
                     episode=episode,
-                    video_path=str(video_path),
+                    video_path=video_path,
                 ),
                 timeout=60,
             )
@@ -826,7 +826,7 @@ async def _search_download_and_process(
                 break
             try:
                 results = await asyncio.wait_for(
-                    registry.search_all(query=q, language="en", video_path=str(video_path)),
+                    registry.search_all(query=q, language="en", video_path=video_path),
                     timeout=30,
                 )
             except asyncio.TimeoutError:
