@@ -1,0 +1,701 @@
+{% extends "base.html" %}
+{% block title %}Settings — Subber{% endblock %}
+{% block tab_settings_class %}active{% endblock %}
+{% block content %}
+<section class="settings-card">
+    <h2>Settings</h2>
+
+    <!-- Cost Estimation -->
+    <div class="settings-section">
+        <h3>Cost Estimation</h3>
+        <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.8rem;">
+            Configure per-model pricing for accurate scan cost estimates. Works with any API (DeepSeek, OpenAI, etc.).
+        </p>
+        <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+            <div class="form-group" style="flex: 1; min-width: 150px;">
+                <label>Input cost ($/M tokens)</label>
+                <input type="number" id="cfg-cost-input" step="0.01" min="0" placeholder="0.14">
+                <div class="hint">e.g. DeepSeek = 0.14</div>
+            </div>
+            <div class="form-group" style="flex: 1; min-width: 150px;">
+                <label>Output cost ($/M tokens)</label>
+                <input type="number" id="cfg-cost-output" step="0.01" min="0" placeholder="0.28">
+                <div class="hint">e.g. DeepSeek = 0.28</div>
+            </div>
+            <div class="form-group" style="flex: 1; min-width: 150px;">
+                <label>Chars per token</label>
+                <input type="number" id="cfg-cost-chars" step="0.1" min="0.5" max="10" placeholder="2.5">
+                <div class="hint">2.5 for CJK, 4.0 for English</div>
+            </div>
+        </div>
+
+        <!-- Peak Pricing -->
+        <div style="margin-top: 0.8rem;">
+            <label class="checkbox-label" style="display: flex; align-items: center; gap: 0.3rem; cursor: pointer;">
+                <input type="checkbox" id="cfg-cost-peak-enabled" onchange="togglePeakConfig()"> Peak pricing
+            </label>
+            <div class="hint">DeepSeek charges 2x during peak hours (UTC 01:00-04:00, 06:00-10:00)</div>
+            <div id="peak-config" style="display: none; margin-top: 0.5rem; padding: 0.8rem; background: var(--bg-secondary, #1a1a2e); border: 1px solid var(--border); border-radius: 8px;">
+                <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+                    <div class="form-group" style="flex: 1; min-width: 120px;">
+                        <label>Surcharge multiplier</label>
+                        <input type="number" id="cfg-cost-peak-mult" step="0.1" min="1" placeholder="2.0">
+                    </div>
+                    <div class="form-group" style="flex: 1; min-width: 120px;">
+                        <label>Timezone</label>
+                        <select id="cfg-cost-timezone">
+                            <option value="UTC">UTC</option>
+                            <option value="Asia/Shanghai">UTC+8 (China)</option>
+                            <option value="Asia/Tokyo">UTC+9 (Japan)</option>
+                            <option value="America/New_York">UTC-5 (US East)</option>
+                            <option value="America/Los_Angeles">UTC-8 (US West)</option>
+                            <option value="Europe/London">UTC+0 (UK)</option>
+                            <option value="Australia/Sydney">UTC+10 (AU East)</option>
+                        </select>
+                    </div>
+                </div>
+                <label style="font-size: 0.85rem; margin-top: 0.5rem;">Peak hour ranges (24h format, your timezone)</label>
+                <div id="peak-ranges"></div>
+            </div>
+            <button onclick="addPeakRange()" style="background: var(--accent); color: #fff; border: none; padding: 0.3rem 0.8rem; border-radius: 4px; cursor: pointer; font-size: 0.8rem; margin-top: 0.5rem;">+ Add Range</button>
+        </div>
+    </div>
+
+    <!-- Translation Backend -->
+    <div class="settings-section">
+        <h3>Translation Settings</h3>
+        <div class="form-group">
+            <label>Temperature (0–2)</label>
+            <input type="number" id="cfg-temperature" step="0.1" min="0" max="2" placeholder="0.1">
+        </div>
+        <div class="form-group">
+            <label>Chunk size (lines per translation request)</label>
+            <input type="number" id="cfg-chunk-size" min="10" max="200" placeholder="50">
+        </div>
+    </div>
+
+
+    <!-- Translation Backends (Advanced) -->
+    <div class="settings-section">
+        <h3>Translation Providers</h3>
+        <p class="hint">Configure your AI providers here. Tried in priority order (lowest = first). Falls back to next on timeout/error.</p>
+        <div id="backend-list"></div>
+        <button class="btn" onclick="addBackend()" style="margin-top:0.5rem;">+ Add Backend</button>
+    </div>
+
+    <!-- Default Languages -->
+    <div class="settings-section">
+        <h3>Default Languages</h3>
+        <div class="form-group">
+            <label>Source Language</label>
+            <select id="cfg-source-lang">
+                <option value="auto">Auto-detect</option>
+                <option value="de">German</option>
+                <option value="ja">Japanese</option>
+                <option value="fr">French</option>
+                <option value="es">Spanish</option>
+                <option value="it">Italian</option>
+                <option value="pt">Portuguese</option>
+                <option value="ru">Russian</option>
+                <option value="zh">Chinese</option>
+                <option value="ko">Korean</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>Target Language</label>
+            <select id="cfg-target-lang">
+                <option value="en">English</option>
+                <option value="de">German</option>
+                <option value="ja">Japanese</option>
+                <option value="fr">French</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Sync -->
+    <div class="settings-section">
+        <h3>Subtitle Sync</h3>
+        <div class="form-group">
+            <label>Sync Engine</label>
+            <select id="cfg-sync-engine">
+                <option value="ffsubsync">ffsubsync (audio-based, accurate)</option>
+                <option value="offset">Manual offset only</option>
+            </select>
+            <div class="hint">ffsubsync requires ffmpeg. Falls back to offset mode if unavailable.</div>
+        </div>
+        <div class="form-group">
+            <label>Default offset (seconds)</label>
+            <input type="number" id="cfg-default-offset" step="0.1" placeholder="0.0">
+        </div>
+    </div>
+
+
+    <!-- Subtitle Providers -->
+    <div class="settings-section">
+        <h3>Subtitle Providers</h3>
+        <p class="hint" style="color: var(--text-muted); margin-bottom: 1rem;">
+            Enable/disable subtitle sources. More providers = better coverage.
+        </p>
+
+        <h4 style="margin-top: 0;">Enabled Providers</h4>
+        <div class="provider-toggles" id="provider-toggles">
+            <label class="checkbox-label">
+                <input type="checkbox" name="providers.embedded" id="cfg-prov-embedded" checked>
+                Embedded (instant, free)
+            </label>
+            <label class="checkbox-label">
+                <input type="checkbox" name="providers.subdl" id="cfg-prov-subdl" checked>
+                SubDL (free API)
+            </label>
+            <label class="checkbox-label">
+                <input type="checkbox" name="providers.addic7ed" id="cfg-prov-addic7ed" checked>
+                Addic7ed (TV, free)
+            </label>
+            <label class="checkbox-label">
+                <input type="checkbox" name="providers.podnapisi" id="cfg-prov-podnapisi" checked>
+                Podnapisi (free)
+            </label>
+            <label class="checkbox-label">
+                <input type="checkbox" name="providers.subscene" id="cfg-prov-subscene" checked>
+                Subscene (free)
+            </label>
+            <label class="checkbox-label">
+                <input type="checkbox" name="providers.opensubtitles" id="cfg-prov-opensubtitles" checked>
+                OpenSubtitles (free 5/day, .org VIP 1,000/day, .com API packages)
+            </label>
+        </div>
+
+        <h4 class="provider-credentials">Provider Credentials</h4>
+
+        <div class="form-group">
+            <label for="subdl-api-key">SubDL API Key</label>
+            <input type="text" id="subdl-api-key" name="providers.subdl.api_key"
+                   placeholder="Free API key from subdl.com">
+            <div class="hint">Get one at <a href="https://subdl.com" target="_blank" style="color: var(--accent);">subdl.com</a> — free, ~2000 requests/day</div>
+        </div>
+
+        <div class="form-group" style="margin-top: 0.5rem;">
+            <label class="checkbox-label">
+                <input type="checkbox" id="subdl-pro-mode"> SubDL PRO Mode (30,000 req/day)
+            </label>
+            <div class="hint" style="color: #f59e0b; margin-top: 0.3rem;" id="pro-warning">
+                WARNING: PRO mode increases rate limit to 30,000 API requests/day.
+                A warning banner will appear on the Library tab when active.
+            </div>
+        </div>
+
+        <!-- OpenSubtitles credentials -->
+        <hr style="border-color: var(--border); margin: 1rem 0;">
+        <h4 style="margin-bottom: 0.5rem;">OpenSubtitles</h4>
+        <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">
+            Two auth methods — use <strong>one</strong>. The .org VIP login gives 1,000 downloads/day.
+            The .com API consumer key works with purchased packages (configurable limit below).
+        </p>
+
+        <!-- .org VIP Auth -->
+        <div style="background: var(--bg-secondary, #1a1a2e); border: 1px solid var(--border); border-radius: 8px; padding: 0.8rem 1rem; margin-bottom: 0.8rem;">
+            <h5 style="margin: 0 0 0.5rem 0; color: var(--accent);">opensubtitles.org — VIP Auth (1,000/day)</h5>
+            <div class="form-group" style="margin-top: 0.3rem;">
+                <label for="opensubtitles-username">Username</label>
+                <input type="text" id="opensubtitles-username" name="providers.opensubtitles.username"
+                       placeholder="Your opensubtitles.org username">
+            </div>
+            <div class="form-group">
+                <label for="opensubtitles-password">Password</label>
+                <input type="password" id="opensubtitles-password" name="providers.opensubtitles.password"
+                       placeholder="Your opensubtitles.org password">
+            </div>
+            <div class="hint">VIP members at <a href="https://www.opensubtitles.org" target="_blank" style="color: var(--accent);">opensubtitles.org</a> get 1,000 downloads/day with username+password.</div>
+        </div>
+
+        <!-- .com API Consumer -->
+        <div style="background: var(--bg-secondary, #1a1a2e); border: 1px solid var(--border); border-radius: 8px; padding: 0.8rem 1rem; margin-bottom: 0.8rem;">
+            <h5 style="margin: 0 0 0.5rem 0; color: var(--accent);">opensubtitles.com — API Consumer Key</h5>
+            <div class="form-group" style="margin-top: 0.3rem;">
+                <label for="opensubtitles-api-key">API Key</label>
+                <input type="text" id="opensubtitles-api-key" name="providers.opensubtitles.api_key"
+                       placeholder="Your OpenSubtitles.com consumer API key">
+                <div class="hint">Get one at <a href="https://www.opensubtitles.com/en/consumers" target="_blank" style="color: var(--accent);">opensubtitles.com/consumers</a></div>
+            </div>
+            <div class="form-group">
+                <label for="opensubtitles-tier">Daily Limit</label>
+                <select id="opensubtitles-tier" name="providers.opensubtitles.tier">
+                    <option value="free">Free (5 downloads/day)</option>
+                    <option value="vip">VIP — .org auth (1,000/day)</option>
+                    <option value="premium">Premium — .com API (5,000/day)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="opensubtitles-daily-limit">Custom daily limit (overrides tier)</label>
+                <input type="number" id="opensubtitles-daily-limit" name="providers.opensubtitles.daily_limit"
+                       placeholder="0 = use tier default" min="0" max="50000" style="width: 200px;">
+                <div class="hint">Set to 0 to use the tier default above. Max 50,000/day for enterprise packages.</div>
+            </div>
+        </div>
+
+        <div class="usage-display" id="opensubtitles-usage" style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.3rem;">
+            Usage: <span id="os-usage-text">Loading...</span>
+        </div>
+
+        <hr style="border-color: var(--border); margin: 1rem 0;">
+
+        <div class="form-group">
+            <label for="addic7ed-cookies">Addic7ed Cookies</label>
+            <input type="text" id="addic7ed-cookies" name="providers.addic7ed.cookies"
+                   placeholder="PHPSESSID=abc; wikisubtitlesuser=xyz; wikisubtitlespass=efg">
+            <div class="hint">Login at addic7ed.com, copy cookies from browser dev tools. Best for TV shows.</div>
+        </div>
+    </div>
+
+    <!-- Caution Zone -->
+    <div class="caution-zone">
+        <h3>⚠ Caution Zone</h3>
+        <p class="caution-desc">These settings can affect disk usage and system stability. Change carefully.</p>
+
+        <div class="form-group">
+            <label>Max upload size (MB)</label>
+            <input type="number" id="cfg-max-upload-mb" min="10" max="65536" placeholder="2048">
+            <div class="hint">Maximum file size for video uploads in Sync mode. Episodes rarely exceed 2GB.</div>
+        </div>
+        <div class="form-group">
+            <label>Min free disk space (MB)</label>
+            <input type="number" id="cfg-min-free-disk-mb" min="100" max="10240" placeholder="1024">
+            <div class="hint">Uploads are rejected if free disk space drops below this threshold to prevent VM issues.</div>
+        </div>
+    </div>
+
+    <!-- Security -->
+    <div class="settings-section">
+        <h3>🔒 Security</h3>
+        <div class="form-group">
+            <label for="cfg-api-key">API Key (write protection)</label>
+            <input type="text" id="cfg-api-key" placeholder="Leave empty to disable auth"
+                   style="width: 100%;">
+            <div class="hint">When set, all write operations (scan, translate, grab, settings changes) require the <code>X-API-Key</code> header. Empty = no auth (default).</div>
+        </div>
+    </div>
+
+    
+    <!-- Library Settings -->
+    <div class="settings-section">
+        <h3>Library Settings</h3>
+
+        <!-- Library paths auto-derived from Mounts configuration -->
+
+        <div class="form-group">
+            <label>Sync Drift Threshold (ms)</label>
+            <input type="number" id="cfg-drift-threshold" min="0" max="5000" placeholder="200">
+            <div class="hint">Only re-sync subtitles if drift exceeds this value.</div>
+        </div>
+        <div class="form-group">
+            <label>Max Concurrent Operations</label>
+            <input type="number" id="cfg-max-concurrent" min="1" max="10" placeholder="2">
+        </div>
+        <div class="form-group">
+            <label>Auto-scan Interval</label>
+            <select id="cfg-scan-interval">
+                <option value="0">Manual</option>
+                <option value="6">Every 6 hours</option>
+                <option value="12">Every 12 hours</option>
+                <option value="24">Every 24 hours</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label class="checkbox-label" style="display: flex; align-items: center; gap: 0.3rem; cursor: pointer;">
+                <input type="checkbox" id="cfg-dry-run-default" checked> Default to Dry Run (recommended)
+            </label>
+        </div>
+    </div>
+
+    <div class="settings-section">
+        <h3>📺 Show Identification</h3>
+        <p class="hint" style="color: var(--text-muted); margin-bottom: 0.8rem;">
+            Resolves show titles using AniList (anime, free) and TMDB (movies/TV, optional key).
+            Improves subtitle provider match rates by searching with canonical titles and IDs.
+        </p>
+        <div class="form-group">
+            <label class="checkbox-label" style="display: flex; align-items: center; gap: 0.3rem; cursor: pointer;">
+                <input type="checkbox" id="cfg-use-identification" checked> Enable show identification
+            </label>
+        </div>
+        <div class="form-group">
+            <label>Preferred Source</label>
+            <select id="cfg-identify-prefer">
+                <option value="anilist">AniList (anime)</option>
+                <option value="tmdb">TMDB (movies/TV)</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>TMDB API Key (optional)</label>
+            <input type="text" id="cfg-tmdb-api-key" placeholder="TMDB v3 API key" style="width:100%;">
+            <div class="hint">Used as fallback when AniList doesn't find a match.</div>
+        </div>
+    
+
+    <!-- SMB/CIFS Library Mounts -->
+    <div class="settings-section" style="margin-top: 1.5rem;">
+        <h3>Library Mounts (SMB/CIFS)</h3>
+        <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.8rem;">
+            Configure SMB/CIFS shares to mount automatically when scanning. Supports multiple shares (Shows, Movies, etc.).
+            <br><strong>Requires Docker container capability:</strong> <code>cap_add: [SYS_ADMIN]</code> in docker-compose.yml.
+        </p>
+
+        <div id="mounts-list"></div>
+
+        <button class="btn-save" onclick="addMount()" style="background: var(--accent); margin-top: 0.5rem; font-size: 0.85rem;">+ Add Mount</button>
+        <span id="mounts-feedback" style="font-size: 0.85rem; margin-left: 0.5rem;"></span>
+    </div>
+
+</div>
+
+<button class="btn-save" onclick="saveSettings()">Save Settings</button>
+    <span class="save-feedback" id="save-feedback"></span>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+const API_KEY = '{{ api_key }}';
+
+async function loadSettings() {
+    try {
+        const resp = await fetch('/api/config?_=' + Date.now(), {cache: 'no-store'});
+        const cfg = await resp.json();
+        // Cost estimation config
+    document.getElementById('cfg-cost-input').value = cfg.cost?.input_cost_per_million ?? 0.14;
+    document.getElementById('cfg-cost-output').value = cfg.cost?.output_cost_per_million ?? 0.28;
+    document.getElementById('cfg-cost-chars').value = cfg.cost?.chars_per_token ?? 2.5;
+    document.getElementById('cfg-cost-peak-enabled').checked = cfg.cost?.peak_enabled ?? false;
+    document.getElementById('cfg-cost-peak-mult').value = cfg.cost?.peak_multiplier ?? 2.0;
+    document.getElementById('cfg-cost-timezone').value = cfg.cost?.timezone || 'UTC';
+    togglePeakConfig();
+    // Load peak hours
+    var ph = cfg.cost?.peak_hours_utc || [[1,4],[6,10]];
+    renderPeakRanges(ph);
+    document.getElementById('cfg-temperature').value = cfg.translation?.temperature ?? 0.1;
+        document.getElementById('cfg-chunk-size').value = cfg.translation?.chunk_size ?? 50;
+        document.getElementById('cfg-source-lang').value = cfg.translation?.source_lang || 'auto';
+        document.getElementById('cfg-target-lang').value = cfg.translation?.target_lang || 'en';
+        document.getElementById('cfg-sync-engine').value = cfg.sync?.engine || 'ffsubsync';
+        document.getElementById('cfg-default-offset').value = cfg.sync?.default_offset ?? 0.0;
+                                document.getElementById('cfg-max-upload-mb').value = cfg.limits?.max_upload_mb ?? 2048;
+        document.getElementById('cfg-min-free-disk-mb').value = cfg.limits?.min_free_disk_mb ?? 1024;
+        // API key
+        document.getElementById('cfg-api-key').value = (cfg.ui?.api_key) || '';
+        // Provider toggles
+        const prov = cfg.providers || {};
+        document.getElementById('cfg-prov-embedded').checked = prov.embedded !== false;
+        document.getElementById('cfg-prov-subdl').checked = prov.subdl !== false;
+        document.getElementById('cfg-prov-addic7ed').checked = prov.addic7ed !== false;
+        document.getElementById('cfg-prov-podnapisi').checked = prov.podnapisi !== false;
+        document.getElementById('cfg-prov-subscene').checked = prov.subscene !== false;
+        document.getElementById('cfg-prov-opensubtitles').checked = prov.opensubtitles !== false;
+                document.getElementById('subdl-api-key').value = prov.subdl?.api_key || '';
+        document.getElementById('subdl-pro-mode').checked = (cfg.providers?.subdl?.pro_mode) || false;
+        // OpenSubtitles settings
+        const osCfg = prov.opensubtitles || {};
+        document.getElementById('opensubtitles-tier').value = osCfg.tier || 'free';
+        document.getElementById('opensubtitles-api-key').value = osCfg.api_key || '';
+        document.getElementById('opensubtitles-username').value = osCfg.username || '';
+        document.getElementById('opensubtitles-password').value = osCfg.password || '';
+        loadOpenSubtitlesUsage();
+        document.getElementById('addic7ed-cookies').value = prov.addic7ed?.cookies || '';
+        // Library settings
+        if (cfg.library) {
+            // Library paths auto-derived from Mounts
+            document.getElementById('cfg-drift-threshold').value = cfg.library.drift_threshold_ms || 200;
+            document.getElementById('cfg-max-concurrent').value = cfg.library.max_concurrent || 2;
+            document.getElementById('cfg-scan-interval').value = cfg.library.scan_interval_hours || 0;
+            document.getElementById('cfg-dry-run-default').checked = cfg.library.dry_run_default !== false;
+            document.getElementById('cfg-use-identification').checked = cfg.library.use_identification !== false;
+            document.getElementById('cfg-identify-prefer').value = cfg.library.identify_prefer || 'anilist';
+            document.getElementById('cfg-tmdb-api-key').value = cfg.library.tmdb_api_key || '';
+        }
+        renderBackends(cfg.translation?.backends || []);
+    } catch (e) {
+        console.error('Failed to load settings:', e);
+    }
+}
+
+
+let currentBackends = [];
+
+function renderBackends(bes) {
+    currentBackends = bes || [];
+    if (!currentBackends.length) { currentBackends = [{name:'Default', api_base:'', api_key:'', model:'', priority: 0}]; }
+    const list = currentBackends;
+    document.getElementById('backend-list').innerHTML = list.map((b, i) => `
+        <div class="backend-entry" style="background:rgba(255,255,255,0.03);border-radius:6px;padding:0.8rem;margin-bottom:0.5rem;">
+            <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;">
+                <input type="text" placeholder="Name" value="${escHtml(b.name||'')}" 
+                    style="flex:1;min-width:100px;" onchange="updateBackend(${i},'name',this.value)">
+                <input type="text" placeholder="API Base URL" value="${escHtml(b.api_base||'')}" 
+                    style="flex:2;min-width:180px;" onchange="updateBackend(${i},'api_base',this.value)">
+                <input type="text" placeholder="Model" value="${escHtml(b.model||'')}" 
+                    style="flex:1;min-width:100px;" onchange="updateBackend(${i},'model',this.value)">
+                <input type="text" placeholder="API Key" value="${escHtml(b.api_key||'')}" 
+                    style="flex:1;min-width:100px;" onchange="updateBackend(${i},'api_key',this.value)">
+                <input type="number" placeholder="Pri" value="${b.priority??i}" 
+                    style="width:58px;" onchange="updateBackend(${i},'priority',parseInt(this.value)||0)">
+                <button class="btn" style="background:var(--error);padding:0.2rem 0.5rem;line-height:1;"
+                    onclick="removeBackend(${i})">x</button>
+            </div>
+        </div>
+    `).join('');
+}
+function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function addBackend() {
+    currentBackends.push({name:'New Backend', api_base:'', api_key:'', model:'', priority: currentBackends.length});
+    renderBackends(currentBackends);
+}
+function removeBackend(i) { currentBackends.splice(i,1); renderBackends(currentBackends); }
+function updateBackend(i, field, value) { currentBackends[i] = {...currentBackends[i], [field]: value}; }
+
+
+function togglePeakConfig() {
+    var el = document.getElementById('peak-config');
+    el.style.display = document.getElementById('cfg-cost-peak-enabled').checked ? 'block' : 'none';
+}
+function renderPeakRanges(ranges) {
+    var el = document.getElementById('peak-ranges');
+    if (!ranges || !ranges.length) { el.innerHTML = ''; return; }
+    el.innerHTML = ranges.map(function(r, i) {
+        return '<div style="display: flex; gap: 0.5rem; align-items: center; margin-top: 0.3rem;">' +
+            '<input type="number" class="peak-start" min="0" max="23" value="' + r[0] + '" style="width: 60px;"> — ' +
+            '<input type="number" class="peak-end" min="0" max="23" value="' + r[1] + '" style="width: 60px;">' +
+            (ranges.length > 1 ? '<button onclick="this.parentElement.remove(); setTimeout(function(){ saveSettings(); }, 300);" style="background: var(--error); color: #fff; border: none; padding: 0.2rem 0.6rem; border-radius: 4px; cursor: pointer;">×</button>' : '') +
+            '</div>';
+    }).join('');
+}
+function addPeakRange() {
+    var ranges = getPeakRanges();
+    ranges.push([0, 0]);
+    renderPeakRanges(ranges);
+    saveSettings();
+}
+function getPeakRanges() {
+    var starts = document.querySelectorAll('.peak-start');
+    var ends = document.querySelectorAll('.peak-end');
+    var r = [];
+    for (var i = 0; i < starts.length; i++) {
+        r.push([parseInt(starts[i].value) || 0, parseInt(ends[i].value) || 0]);
+    }
+    return r;
+}
+// parseFloat that respects 0 (free/local models) — || default would clobber 0
+function numOr(id, dflt) {
+    var v = parseFloat(document.getElementById(id).value);
+    return isNaN(v) ? dflt : v;
+}
+async function saveSettings() {
+    const fb = document.getElementById('save-feedback');
+    fb.className = 'save-feedback';
+
+    const sections = [
+        {
+            section: 'translation',
+            values: {
+                temperature: parseFloat(document.getElementById('cfg-temperature').value) || 0.1,
+                chunk_size: parseInt(document.getElementById('cfg-chunk-size').value) || 50,
+                source_lang: document.getElementById('cfg-source-lang').value,
+                target_lang: document.getElementById('cfg-target-lang').value,
+                timeout: 120,
+                max_retries: 1,
+                backends: currentBackends,
+            }
+        },
+        {
+            section: 'sync',
+            values: {
+                engine: document.getElementById('cfg-sync-engine').value,
+                default_offset: parseFloat(document.getElementById('cfg-default-offset').value) || 0.0,
+            }
+        },
+        {
+            section: 'providers',
+            values: {
+                embedded: document.getElementById('cfg-prov-embedded').checked,
+                subdl: { api_key: document.getElementById('subdl-api-key').value, pro_mode: document.getElementById('subdl-pro-mode').checked },
+                addic7ed: { cookies: document.getElementById('addic7ed-cookies').value },
+                podnapisi: document.getElementById('cfg-prov-podnapisi').checked,
+                subscene: document.getElementById('cfg-prov-subscene').checked,
+                opensubtitles: {
+                    tier: document.getElementById('opensubtitles-tier').value,
+                    api_key: document.getElementById('opensubtitles-api-key').value,
+                    username: document.getElementById('opensubtitles-username').value,
+                    password: document.getElementById('opensubtitles-password').value,
+                },
+                
+            }
+        },
+        {
+            section: 'library',
+            values: {
+                
+                drift_threshold_ms: parseInt(document.getElementById('cfg-drift-threshold').value) || 200,
+                max_concurrent: parseInt(document.getElementById('cfg-max-concurrent').value) || 2,
+                scan_interval_hours: parseInt(document.getElementById('cfg-scan-interval').value) || 0,
+                dry_run_default: document.getElementById('cfg-dry-run-default').checked,
+                use_identification: document.getElementById('cfg-use-identification').checked,
+                identify_prefer: document.getElementById('cfg-identify-prefer').value,
+                tmdb_api_key: document.getElementById('cfg-tmdb-api-key').value,
+            }
+        },
+        {
+            section: 'limits',
+            values: {
+                max_upload_mb: parseInt(document.getElementById('cfg-max-upload-mb').value) || 2048,
+                min_free_disk_mb: parseInt(document.getElementById('cfg-min-free-disk-mb').value) || 1024,
+            }
+        },
+        {
+            section: 'cost',
+            values: {
+                input_cost_per_million: numOr('cfg-cost-input', 0.14),
+                output_cost_per_million: numOr('cfg-cost-output', 0.28),
+                chars_per_token: numOr('cfg-cost-chars', 2.5),
+                peak_enabled: document.getElementById('cfg-cost-peak-enabled').checked,
+                peak_multiplier: numOr('cfg-cost-peak-mult', 2.0),
+                peak_hours_utc: getPeakRanges(),
+                timezone: document.getElementById('cfg-cost-timezone').value,
+            }
+        },
+        {
+            section: 'ui',
+            values: {
+                api_key: document.getElementById('cfg-api-key').value,
+            }
+        }
+    ];
+
+    try {
+        for (const s of sections) {
+            const resp = await fetch('/api/config', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json', 'X-API-Key': API_KEY},
+                body: JSON.stringify(s),
+            });
+            if (!resp.ok) throw new Error(await resp.text());
+        }
+        fb.textContent = '✓ Settings saved';
+        fb.className = 'save-feedback show success';
+    } catch (e) {
+        fb.textContent = '✗ Save failed: ' + e.message;
+        fb.className = 'save-feedback show error';
+    }
+    setTimeout(() => fb.className = 'save-feedback', 3000);
+}
+
+// ── Mount Management ──
+let mountsConfig = [];
+let _realPasswords = {};  // Persist real passwords across API reloads
+
+async function loadMounts() {
+    try {
+        const resp = await fetch('/api/library/mounts');
+        const data = await resp.json();
+        const apiMounts = data.mounts || [];
+        // Restore real passwords from our persistent store
+        for (const am of apiMounts) {
+            const key = am.server + '|' + am.share;
+            if (_realPasswords[key]) {
+                am.password = _realPasswords[key];
+            } else if (am.password === '********') {
+                am.password = ''; // Don't keep masked value
+            }
+        }
+        mountsConfig = apiMounts;
+        renderMounts();
+    } catch (e) {
+        console.error('Load mounts error:', e);
+    }
+}
+
+function renderMounts() {
+    const list = document.getElementById('mounts-list');
+    if (!list) return;
+    if (!mountsConfig.length) {
+        list.innerHTML = '<p style="color: var(--text-muted); font-size: 0.85rem;">No mounts configured. Click "+ Add Mount" to add one.</p>';
+        return;
+    }
+    list.innerHTML = mountsConfig.map((m, i) => '<div class="mount-entry" style="background: var(--bg-secondary, #1a1a2e); border: 1px solid var(--border); border-radius: 8px; padding: 0.8rem; margin-bottom: 0.5rem;">' +
+        '<div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">' +
+        '<input type="text" placeholder="Name (e.g. Anime Shows)" value="' + esc(m.name) + '" onchange="updateMount(' + i + ', &quot;name&quot;, this.value)" style="flex: 1; min-width: 150px; padding: 0.3rem; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 4px;">' +
+        '<input type="text" placeholder="Server IP" value="' + esc(m.server) + '" onchange="updateMount(' + i + ', &quot;server&quot;, this.value)" style="width: 130px; padding: 0.3rem; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 4px;">' +
+        '<input type="text" placeholder="Share name" value="' + esc(m.share) + '" onchange="updateMount(' + i + ', &quot;share&quot;, this.value)" style="width: 130px; padding: 0.3rem; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 4px;">' +
+        '<button onclick="removeMount(' + i + ')" style="background: var(--error); color: #fff; border: none; padding: 0.3rem 0.6rem; border-radius: 4px; cursor: pointer;">Remove</button></div>' +
+        '<div style="display: flex; gap: 0.5rem; margin-top: 0.4rem; flex-wrap: wrap; align-items: center;">' +
+        '<input type="text" placeholder="Username" value="' + esc(m.username) + '" onchange="updateMount(' + i + ', &quot;username&quot;, this.value)" style="width: 130px; padding: 0.3rem; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 4px;">' +
+        '<input type="password" placeholder="Password" value="' + esc(m.password || '') + '" onchange="updateMount(' + i + ', &quot;password&quot;, this.value)" style="width: 130px; padding: 0.3rem; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 4px;">' +
+        '<input type="text" placeholder="Mount point (e.g. /mnt/anime)" value="' + esc(m.mount_point) + '" onchange="updateMount(' + i + ', &quot;mount_point&quot;, this.value)" style="flex: 1; min-width: 180px; padding: 0.3rem; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 4px;">' +
+        '<label style="display: flex; align-items: center; gap: 0.3rem; font-size: 0.85rem; white-space: nowrap; cursor: pointer; color: var(--text);"><input type="checkbox"' + (m.enabled !== false ? ' checked' : '') + ' onchange="updateMount(' + i + ', \'enabled\', this.checked)"> Enabled</label>' +
+        '<button onclick="testMount(' + i + ')" style="background: var(--accent); color: #fff; border: none; padding: 0.3rem 0.8rem; border-radius: 4px; cursor: pointer; font-size: 0.85rem;">Test</button></div></div>').join('');
+}
+
+function addMount() {
+    mountsConfig.push({ name: '', server: '', share: '', username: '', password: '', mount_point: '/mnt/', enabled: true });
+    renderMounts();
+    saveMounts();
+}
+
+function removeMount(index) {
+    mountsConfig.splice(index, 1);
+    renderMounts();
+    saveMounts();
+}
+
+function updateMount(index, key, value) {
+    mountsConfig[index][key] = value;
+    // Save real password so it survives API reloads
+    if (key === 'password' && value && value !== '********') {
+        const m = mountsConfig[index];
+        _realPasswords[m.server + '|' + m.share] = value;
+    }
+    clearTimeout(window._mountSaveTimeout);
+    window._mountSaveTimeout = setTimeout(saveMounts, 500);
+}
+
+async function saveMounts() {
+    const fb = document.getElementById('mounts-feedback');
+    try {
+        const resp = await fetch('/api/library/mounts', { method: 'POST', headers: {'Content-Type': 'application/json', 'X-API-Key': API_KEY}, body: JSON.stringify({mounts: mountsConfig}) });
+        const data = await resp.json();
+        if (data.error) { fb.textContent = 'Save failed: ' + data.error; fb.style.color = 'var(--error)'; }
+        else { fb.textContent = 'Mounts saved (' + data.count + ')'; fb.style.color = 'var(--success, #22c55e)'; setTimeout(() => fb.textContent = '', 2000); }
+    } catch (e) { fb.textContent = 'Save error: ' + e.message; fb.style.color = 'var(--error)'; }
+}
+
+async function testMount(index) {
+    const m = mountsConfig[index];
+    const fb = document.getElementById('mounts-feedback');
+    fb.textContent = 'Testing...'; fb.style.color = 'var(--text-muted)';
+    try {
+        const resp = await fetch('/api/library/mounts/test', { method: 'POST', headers: {'Content-Type': 'application/json', 'X-API-Key': API_KEY}, body: JSON.stringify(m) });
+        const data = await resp.json();
+        if (data.status === 'ok') { fb.textContent = 'Connected! Files: ' + data.files.join(', '); fb.style.color = 'var(--success, #22c55e)'; }
+        else { fb.textContent = 'Failed: ' + (data.error || 'Unknown'); fb.style.color = 'var(--error)'; }
+    } catch (e) { fb.textContent = 'Test error: ' + e.message; fb.style.color = 'var(--error)'; }
+}
+
+function esc(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+loadMounts();
+
+async function loadOpenSubtitlesUsage() {
+    try {
+        const resp = await fetch('/api/providers/opensubtitles/usage');
+        const data = await resp.json();
+        if (data.error) {
+            document.getElementById('os-usage-text').textContent = 'N/A';
+            return;
+        }
+        document.getElementById('os-usage-text').textContent =
+            data.used_today + ' / ' + data.daily_limit + ' used today (' + data.remaining + ' remaining) [' + data.tier + ' tier]';
+    } catch (e) {
+        document.getElementById('os-usage-text').textContent = 'Could not load';
+    }
+}
+
+
+loadSettings();
+</script>
+{% endblock %}

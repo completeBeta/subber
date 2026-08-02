@@ -1,0 +1,891 @@
+{% extends "base.html" %}
+{% block title %}Library — Subber{% endblock %}
+{% block tab_library_class %}active{% endblock %}
+{% block content %}
+<section class="library-card">
+    <h2>Library Manager</h2>
+    <p class="sub" style="color: var(--text-muted); margin-bottom: 1rem;">
+        Scan your media library and ensure every video has synced English subtitles.
+    </p>
+
+    <!-- SubDL PRO warning banner -->
+    <div id="pro-mode-banner" style="display: none; background: #f59e0b; color: #000; padding: 0.6rem 1rem; border-radius: 6px; margin-bottom: 1rem; font-weight: 600; text-align: center;">
+        SubDL PRO mode is ACTIVE — 30,000 API requests/day limit
+    </div>
+
+    <!-- Status Bar -->
+    <div class="library-status-bar" id="status-bar">
+        <div class="stat-item">
+            <span class="stat-label" style="cursor:pointer" onclick="filterByStatus('all')" title="Show all files">📊 Total</span>
+            <span class="stat-value" id="stat-total">0</span>
+        </div>
+        <div class="stat-item">
+            <span class="stat-label" style="cursor:pointer" onclick="filterByStatus('done')" title="Show only completed files">✅ Done</span>
+            <span class="stat-value" id="stat-done">0</span>
+        </div>
+        <div class="stat-item">
+            <span class="stat-label" style="cursor:pointer" onclick="filterByStatus('pending')" title="Show only pending files">⏳ Pending</span>
+            <span class="stat-value" id="stat-pending">0</span>
+        </div>
+        <div class="stat-item">
+            <span class="stat-label">🔄 In Progress</span>
+            <span class="stat-value" id="stat-progress">0</span>
+        </div>
+        <div class="stat-item">
+            <span class="stat-label" style="cursor:pointer" onclick="filterByStatus('failed')" title="Show only failed files">❌ Failed</span>
+            <span class="stat-value" id="stat-failed">0</span>
+        </div>
+        <div class="stat-item">
+            <span class="stat-label" style="cursor:pointer" onclick="filterByStatus('skipped')" title="Show only skipped files">⏭️ Skipped</span>
+            <span class="stat-value" id="stat-skipped">0</span>
+        </div>
+        <div class="stat-item">
+            <span class="stat-label">💰 Cost</span>
+            <span class="stat-value" id="stat-cost">$0.00</span>
+        </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="library-controls">
+        <div class="control-group">
+            <button class="btn-save" id="scan-full-btn" onclick="confirmFullScan()">Scan Library (Full)</button>
+            <button class="btn-save" id="scan-incremental-btn" onclick="startScan('incremental')">Scan New Only</button>
+        </div>
+        <div class="control-group">
+            <label class="checkbox-label">
+                <input type="checkbox" id="dry-run-toggle"> Dry Run
+            </label>
+        </div>
+        <div class="control-group" style="margin-left: auto;">
+            <button class="btn-save" id="reports-btn" onclick="toggleReportsPanel()" style="background: var(--accent);">☰ Reports</button>
+        </div>
+        <div class="control-group">
+            <button class="btn-save" id="reset-stats-btn" onclick="resetStats()" style="background: var(--error);">Reset Statistics</button>
+        </div>
+        <div class="control-group">
+            <select id="media-type-filter" onchange="loadFiles()">
+                <option value="all">All Types</option>
+                <option value="tv">TV Shows</option>
+                <option value="movie">Movies</option>
+            </select>
+            <select id="status-filter" onchange="loadFiles()">
+                <option value="all">All Status</option>
+                <option value="pending">Pending</option>
+                <option value="done">Done</option>
+                <option value="failed">Failed</option>
+                <option value="skipped">Skipped</option>
+            </select>
+            <input type="text" id="search-input" placeholder="Search..." oninput="debounceSearch()" style="padding: 0.3rem 0.5rem; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 4px;">
+        </div>
+    </div>
+
+    <!-- Retry banner (appears when viewing failed files) -->
+    <div id="retry-banner" style="display: none; background: linear-gradient(135deg, #dc2626, #991b1b); color: #fff; padding: 0.8rem 1.2rem; border-radius: 8px; margin-bottom: 1rem; text-align: center; font-weight: 600; font-size: 1rem;">
+        <span id="retry-banner-msg">0 files failed</span>
+        <button id="retry-banner-btn" onclick="retryAllFiltered()" style="background: #fff; color: #dc2626; border: none; padding: 0.5rem 1.5rem; border-radius: 6px; margin-left: 1rem; font-weight: 700; cursor: pointer; font-size: 0.95rem;">🔄 Retry All</button>
+    </div>
+
+    <!-- Active scan progress -->
+    <div id="scan-progress" style="display: none;">
+        <div class="scan-progress-bar">
+            <div class="scan-progress-fill" id="scan-progress-fill" style="width: 0%"></div>
+        </div>
+        <p id="scan-progress-text" style="color: var(--text-muted); margin-top: 0.5rem;">Scanning...</p>
+        <button id="cancel-scan-btn" onclick="cancelScan()" style="display: none; background: var(--error); color: #fff; border: none; padding: 0.4rem 1rem; border-radius: 6px; cursor: pointer; margin-top: 0.5rem;">Cancel Scan</button>
+    </div>
+
+    <!-- Stats panel -->
+    <div class="library-stats-panel" id="stats-panel">
+        <div class="stat-pill">Translated: <span id="stat-translated">0</span></div>
+        <div class="stat-pill">Downloaded: <span id="stat-downloaded">0</span></div>
+        <div class="stat-pill">Synced: <span id="stat-synced">0</span></div>
+        <div class="stat-pill">Skipped: <span id="stat-skipped2">0</span></div>
+        <div class="stat-pill">Last scan: <span id="stat-last-scan">Never</span></div>
+    </div>
+
+    <!-- Results Table -->
+    <div class="library-table-wrapper">
+        <table class="library-table" id="library-table">
+            <thead>
+                <tr>
+                    <th>Status</th>
+                    <th>Show / Movie</th>
+                    <th>Episode</th>
+                    <th>Action</th>
+                    <th>Subtitle</th>
+                    <th>Provider</th>
+                    <th>Drift</th>
+                    <th>Cost</th>
+                    <th>Elapsed</th>
+                    <th>Updated</th>
+                </tr>
+            </thead>
+            <tbody id="library-tbody">
+                <tr><td colspan="10" style="text-align: center; color: var(--text-muted); padding: 2rem;">No files loaded. Click "Scan Library" to start.</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Pagination -->
+    <div class="library-pagination" id="pagination" style="display: none;">
+        <button id="first-page-btn" onclick="goToPage(1)">« First</button>
+        <button id="prev-page-btn" onclick="changePage(-1)">‹ Prev</button>
+        <span id="page-numbers"></span>
+        <button id="next-page-btn" onclick="changePage(1)">Next ›</button>
+        <button id="last-page-btn" onclick="goToPage(totalPages)">Last »</button>
+    </div>
+</section>
+
+<!-- Reports Slide-out Panel -->
+<div id="reports-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9998;" onclick="toggleReportsPanel()"></div>
+<div id="reports-panel" style="display: none; position: fixed; top: 0; right: 0; width: 480px; max-width: 95vw; height: 100%; background: var(--bg); border-left: 2px solid var(--border); z-index: 9999; overflow-y: auto; box-shadow: -4px 0 20px rgba(0,0,0,0.4); padding: 1.5rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h3 style="margin: 0;">📄 Library Reports</h3>
+        <button onclick="toggleReportsPanel()" style="background: none; border: none; color: var(--text-muted); font-size: 1.5rem; cursor: pointer;">✕</button>
+    </div>
+
+    <button class="btn-save" id="generate-report-btn" onclick="generateReport()" style="width: 100%; margin-bottom: 1rem;">📊 Generate New Report</button>
+
+    <div id="report-loading" style="display: none; text-align: center; padding: 1rem; color: var(--text-muted);">⏳ Generating report...</div>
+
+    <div id="reports-list" style="margin-bottom: 1rem;">
+        <h4 style="margin-bottom: 0.5rem;">Saved Reports</h4>
+        <div id="reports-list-inner" style="color: var(--text-muted);">Loading...</div>
+    </div>
+
+    <hr style="border-color: var(--border); margin: 1rem 0;">
+
+    <div id="report-viewer" style="display: none;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+            <h4 id="report-viewer-title" style="margin: 0;">Report</h4>
+            <button onclick="closeReportViewer()" style="background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 1.2rem;">✕</button>
+        </div>
+        <pre id="report-viewer-content" style="background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 6px; padding: 1rem; font-size: 0.8rem; line-height: 1.4; overflow-x: auto; white-space: pre-wrap; word-break: break-word; max-height: calc(100vh - 300px); overflow-y: auto;"></pre>
+    </div>
+</div>
+
+<!-- Toast notifications -->
+<div id="toast-container" style="position: fixed; top: 1rem; right: 1rem; z-index: 9999; display: flex; flex-direction: column; gap: 0.5rem;"></div>
+<style>
+.toast {
+    padding: 0.8rem 1.2rem;
+    border-radius: 6px;
+    color: white;
+    font-size: 0.9rem;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    animation: slideIn 0.3s ease;
+    max-width: 400px;
+}
+.toast.success { background: var(--success); }
+.toast.error { background: var(--error); }
+.toast.info { background: var(--accent); }
+.toast.warning { background: #f59e0b; }
+@keyframes slideIn {
+    from { transform: translateX(100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+.toast.fadeout { animation: fadeOut 0.3s ease forwards; }
+@keyframes fadeOut {
+    to { transform: translateX(100%); opacity: 0; }
+}
+</style>
+{% endblock %}
+{% block scripts %}
+<script>
+const API_KEY = '{{ api_key }}';
+let currentPage = 1;
+let totalPages = 1;
+const pageSize = 50;
+const expandedRows = new Set();  // Survives table re-renders during auto-update
+let activeScanId = null;
+let scanPollInterval = null;
+let searchTimeout = null;
+
+// Load stats on page load
+document.addEventListener('DOMContentLoaded', () => {
+    loadStats();
+    loadFiles();
+    // Check for active scan on page load
+    checkActiveScan();
+});
+
+// ── Toast notifications ──
+function showToast(message, type, duration) {
+    type = type || 'info';
+    duration = duration || 4000;
+    const container = document.getElementById('toast-container');
+    const toast = document.createElement('div');
+    toast.className = 'toast ' + type;
+    toast.textContent = message;
+    container.appendChild(toast);
+    setTimeout(function() {
+        toast.classList.add('fadeout');
+        setTimeout(function() { toast.remove(); }, 300);
+    }, duration);
+}
+
+// ── Button loading state ──
+function setButtonLoading(btnId, loading, originalText) {
+    const btn = document.getElementById(btnId);
+    if (!btn) return;
+    if (loading) {
+        btn.dataset.original = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = '⏳ Working...';
+    } else {
+        btn.disabled = false;
+        btn.textContent = originalText || btn.dataset.original || btn.textContent;
+    }
+}
+
+// ── Stats ──
+async function loadStats() {
+    try {
+        const resp = await fetch('/api/library/status');
+        const data = await resp.json();
+
+        const tv = data.tv || {};
+        const movies = data.movies || {};
+
+        document.getElementById('stat-total').textContent = (tv.total || 0) + (movies.total || 0);
+        document.getElementById('stat-done').textContent = (tv.done || 0) + (movies.done || 0);
+        document.getElementById('stat-pending').textContent = (tv.pending || 0) + (movies.pending || 0);
+        document.getElementById('stat-progress').textContent = (tv.in_progress || 0) + (movies.in_progress || 0);
+        document.getElementById('stat-failed').textContent = (tv.failed || 0) + (movies.failed || 0);
+        document.getElementById('stat-skipped').textContent = (tv.skipped || 0) + (movies.skipped || 0);
+        document.getElementById('stat-cost').textContent = '$' + (data.total_cost || 0).toFixed(4);
+
+        // Stats panel
+        const actions = data.actions || {};
+        document.getElementById('stat-translated').textContent = (actions.translated || 0) + (actions.downloaded_and_translated || 0);
+        document.getElementById('stat-downloaded').textContent = actions.downloaded || 0;
+        document.getElementById('stat-synced').textContent = actions.synced || 0;
+        document.getElementById('stat-skipped2').textContent = actions.skipped || 0;
+
+        if (data.last_scan) {
+            const scanTime = new Date(data.last_scan.started_at + 'Z');
+            const ago = timeAgo(scanTime);
+            document.getElementById('stat-last-scan').textContent = ago;
+        }
+    } catch (e) {
+        console.error('Stats error:', e);
+    }
+}
+
+// Check for running scan on page load (survives refresh)
+async function checkActiveScan() {
+    try {
+        const resp = await fetch('/api/library/status');
+        const data = await resp.json();
+        if (data.active_scan_id) {
+            activeScanId = data.active_scan_id;
+            document.getElementById('scan-progress').style.display = 'block';
+            document.getElementById('cancel-scan-btn').style.display = 'inline-block';
+            document.getElementById('scan-full-btn').disabled = true;
+            document.getElementById('scan-incremental-btn').disabled = true;
+            pollScan();
+        }
+    } catch (e) {}
+}
+
+// ── Files table ──
+async function loadFiles() {
+    const status = document.getElementById('status-filter').value;
+    const mediaType = document.getElementById('media-type-filter').value;
+    const search = document.getElementById('search-input').value;
+    // Show/hide retry banner based on filter
+    const banner = document.getElementById('retry-banner');
+    if (banner) {
+        banner.style.display = (status === 'failed') ? 'block' : 'none';
+    }
+
+    try {
+        const params = new URLSearchParams({
+            status: status,
+            media_type: mediaType,
+            page: currentPage,
+            limit: pageSize,
+            sort: 'updated_at',
+            order: 'desc',
+        });
+        if (search) params.set('search', search);
+
+        const resp = await fetch('/api/library/files?' + params);
+        const data = await resp.json();
+
+        // Update banner message with actual count (after fetch)
+        if (banner && status === 'failed') {
+            document.getElementById('retry-banner-msg').textContent = data.total + ' file(s) failed — ';
+        }
+
+        totalPages = Math.ceil(data.total / pageSize) || 1;
+        renderTable(data.files);
+        renderPagination(data.total);
+    } catch (e) {
+        console.error('Load files error:', e);
+        showToast('Failed to load files: ' + e.message, 'error');
+    }
+}
+
+function renderTable(files) {
+    const tbody = document.getElementById('library-tbody');
+    if (!files.length) {
+        tbody.innerHTML = '<tr><td colspan="10" style="text-align: center; color: var(--text-muted); padding: 2rem;">No files found. Run a scan to populate the library.</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = files.map(function(f) {
+        // Track whether this row should be expanded
+        f._shouldExpand = expandedRows.has(f.id);
+        const statusIcon = {
+            'done': '✅',
+            'pending': '⏳',
+            'in_progress': '🔄',
+            'failed': '❌',
+            'skipped': '⏭️',
+        }[f.status] || '❓';
+
+        const title = f.media_type === 'tv'
+            ? (f.show_title || 'Unknown')
+            : (f.movie_title || 'Unknown');
+        const episode = f.media_type === 'tv'
+            ? 'S' + String(f.season || 0).padStart(2, '0') + 'E' + String(f.episode || 0).padStart(2, '0')
+            : (f.movie_year ? '(' + f.movie_year + ')' : '');
+
+        // Differentiate dry-run planned actions from real actions
+        // Only flag pending records as dry-run (failures have no model/cost for different reasons)
+        const isDryRun = f.status === 'pending' && (!f.model_used || f.model_used === '') && (f.translation_cost || 0) === 0 && (!f.provider_used || f.provider_used === '');
+        let actionDisplay = f.action_taken || '—';
+        if (isDryRun && f.action_taken === 'translated') actionDisplay = 'planned: translate';
+        else if (isDryRun && f.action_taken === 'downloaded') actionDisplay = 'planned: download';
+        else if (isDryRun && f.action_taken === 'downloaded_and_translated') actionDisplay = 'planned: dl+translate';
+        let modelDisplay = f.model_used || (isDryRun ? '— (dry run)' : '—');
+        let costDisplay = '$' + ((f.translation_cost || 0).toFixed(4));
+        if (isDryRun && (f.translation_cost || 0) === 0) costDisplay = '$0.0000 (dry run)';
+        else if (f.status === 'failed' && (f.translation_cost || 0) === 0) { costDisplay = '—'; modelDisplay = '—'; }
+
+        const drift = (f.sync_drift_ms !== null && f.sync_drift_ms !== undefined)
+            ? f.sync_drift_ms + 'ms'
+            : '—';
+
+        const updated = f.updated_at ? timeAgo(new Date(f.updated_at + 'Z')) : '';
+        const created = f.created_at ? new Date(f.created_at + 'Z') : null;
+        const elapsed = created && f.updated_at ? formatDuration((new Date(f.updated_at + 'Z') - created) / 1000) : '-';
+
+
+        const rowClass = f.status === 'failed' ? 'row-failed' : '';
+
+        let detailHtml = '<div class="row-detail">' +
+            '<strong>Path:</strong> ' + escapeHtml(f.file_path || '') + '<br>' +
+            '<strong>Model:</strong> ' + escapeHtml(modelDisplay) + '<br>' +
+            '<strong>Cost:</strong> ' + costDisplay + '<br>' +
+            '<strong>Languages:</strong> ' + escapeHtml((f.subtitle_languages || []).join(', ') || '—') + '<br>';
+        if (f.error_message) {
+            detailHtml += '<strong style="color: var(--error);">Error:</strong> ' + escapeHtml(f.error_message) + '<br>';
+        }
+        if (f.status === 'failed') {
+            detailHtml += '<button class="btn-save" style="margin-top: 0.5rem;" onclick="retryFile(' + f.id + '); event.stopPropagation();">Retry</button>';
+        }
+        detailHtml += '</div>';
+
+        return '<tr class="' + rowClass + '" onclick="toggleRowDetail(' + f.id + ')">' +
+            '<td>' + statusIcon + '</td>' +
+            '<td>' + escapeHtml(title) + '</td>' +
+            '<td>' + escapeHtml(episode) + '</td>' +
+            '<td>' + escapeHtml(actionDisplay) + '</td>' +
+            '<td>' + escapeHtml(f.subtitle_path ? f.subtitle_path.split('/').pop().split('\\').pop() : '—') + '</td>' +
+            '<td>' + escapeHtml(f.provider_used || '—') + '</td>' +
+            '<td>' + drift + '</td>' +
+            '<td>' + costDisplay + '</td>' +
+            '<td>' + elapsed + '</td>' +
+            '<td>' + updated + '</td>' +
+            '</tr>' +
+            '<tr class="detail-row" id="detail-' + f.id + '" style="display:none;">' +
+            '<td colspan="10">' + detailHtml + '</td>' +
+            '</tr>';
+    }).join('');
+
+    // Re-expand detail rows that were open before re-render
+    expandedRows.forEach(function(id) {
+        const row = document.getElementById('detail-' + id);
+        if (row) row.style.display = '';
+    });
+}
+
+function toggleRowDetail(id) {
+    const row = document.getElementById('detail-' + id);
+    if (!row) return;
+    if (row.style.display === 'none') {
+        row.style.display = '';
+        expandedRows.add(id);
+    } else {
+        row.style.display = 'none';
+        expandedRows.delete(id);
+    }
+}
+
+function renderPagination(total) {
+    const pagi = document.getElementById('pagination');
+    if (total <= pageSize) {
+        pagi.style.display = 'none';
+        return;
+    }
+    pagi.style.display = 'flex';
+    document.getElementById('first-page-btn').disabled = currentPage <= 1;
+    document.getElementById('prev-page-btn').disabled = currentPage <= 1;
+    document.getElementById('next-page-btn').disabled = currentPage >= totalPages;
+    document.getElementById('last-page-btn').disabled = currentPage >= totalPages;
+
+    // Build numbered page links (Google-style)
+    const maxVisible = 7;
+    let start = Math.max(1, currentPage - Math.floor(maxVisible / 2));
+    let end = Math.min(totalPages, start + maxVisible - 1);
+    if (end - start < maxVisible - 1) start = Math.max(1, end - maxVisible + 1);
+
+    let html = '';
+    if (start > 1) {
+        html += '<button class="page-num" onclick="goToPage(1)">1</button>';
+        if (start > 2) html += '<span class="page-ellipsis">…</span>';
+    }
+    for (let i = start; i <= end; i++) {
+        html += '<button class="page-num' + (i === currentPage ? ' active' : '') + '" onclick="goToPage(' + i + ')">' + i + '</button>';
+    }
+    if (end < totalPages) {
+        if (end < totalPages - 1) html += '<span class="page-ellipsis">…</span>';
+        html += '<button class="page-num" onclick="goToPage(' + totalPages + ')">' + totalPages + '</button>';
+    }
+    document.getElementById('page-numbers').innerHTML = html;
+}
+
+function changePage(delta) {
+    const newPage = currentPage + delta;
+    if (newPage >= 1 && newPage <= totalPages) {
+        currentPage = newPage;
+        loadFiles();
+    }
+}
+
+function goToPage(n) {
+    if (n >= 1 && n <= totalPages) {
+        currentPage = n;
+        loadFiles();
+    }
+}
+
+function filterByStatus(status) {
+    document.getElementById('status-filter').value = status;
+    document.getElementById('media-type-filter').value = 'all';
+    currentPage = 1;
+    loadFiles();
+}
+
+function debounceSearch() {
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(function() {
+        currentPage = 1;
+        loadFiles();
+    }, 300);
+}
+
+// ── Scan ──
+function confirmFullScan() {
+    const dryRun = document.getElementById('dry-run-toggle').checked;
+    const msg = dryRun
+        ? '⚠ Dry-run scan — no changes will be made. This will re-scan ALL files in your library. Continue?'
+        : '⚠ WARNING: Full scan with Dry Run OFF will re-process EVERY file from scratch (re-extract, re-download, re-translate). Existing subtitle files may be overwritten. Are you sure?';
+    if (!confirm(msg)) return;
+    startScan('full');
+}
+
+async function startScan(type) {
+    const dryRun = document.getElementById('dry-run-toggle').checked;
+    const btnId = type === 'full' ? 'scan-full-btn' : 'scan-incremental-btn';
+    setButtonLoading(btnId, true);
+    showToast(dryRun ? 'Starting dry-run scan...' : 'Starting scan (apply mode)...', 'info');
+
+    try {
+        const resp = await fetch('/api/library/scan', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-API-Key': API_KEY},
+            body: JSON.stringify({type: type, dry_run: dryRun}),
+        });
+        const data = await resp.json();
+
+        if (data.error) {
+            showToast('Scan failed: ' + data.error, 'error', 6000);
+            setButtonLoading(btnId, false, type === 'full' ? 'Scan Library (Full)' : 'Scan New Only');
+            return;
+        }
+
+        activeScanId = data.scan_id;
+        document.getElementById('scan-progress').style.display = 'block';
+        document.getElementById('cancel-scan-btn').style.display = 'inline-block';
+        document.getElementById('scan-full-btn').disabled = true;
+        document.getElementById('scan-incremental-btn').disabled = true;
+        document.getElementById('scan-progress-fill').style.width = '0%';
+        document.getElementById('scan-progress-text').textContent = 'Scanning filesystem...';
+        showToast(dryRun ? 'Dry-run scan started — analyzing files (no changes will be made)' : 'Scan started — processing files', 'info', 5000);
+
+        pollScan();
+    } catch (e) {
+        showToast('Scan error: ' + e.message, 'error', 6000);
+        setButtonLoading(btnId, false, type === 'full' ? 'Scan Library (Full)' : 'Scan New Only');
+    }
+}
+
+function pollScan() {
+    if (scanPollInterval) clearInterval(scanPollInterval);
+    scanPollInterval = setInterval(async function() {
+        if (!activeScanId) return;
+        try {
+            const resp = await fetch('/api/library/scan/' + activeScanId);
+            const data = await resp.json();
+
+            const pct = data.files_total > 0
+                ? Math.round((data.files_processed / data.files_total) * 100)
+                : 0;
+            document.getElementById('scan-progress-fill').style.width = pct + '%';
+            document.getElementById('scan-progress-text').textContent =
+                'Processing ' + (data.files_processed || 0) + ' of ' + (data.files_total || 0) + ' files (' + pct + '%)';
+
+            // Reload stats and files during scan for live updates
+            if (pct > 0 && pct < 100) {
+                loadStats();
+                loadFiles();
+            } else if (data.status === 'running') {
+                // Still scanning filesystem — reload file list
+                loadStats();
+                loadFiles();
+            }
+
+            if (data.status === 'completed' || data.status === 'failed') {
+                clearInterval(scanPollInterval);
+                scanPollInterval = null;
+                activeScanId = null;
+                setButtonLoading('scan-full-btn', false, 'Scan Library (Full)');
+                setButtonLoading('scan-incremental-btn', false, 'Scan New Only');
+
+                if (data.status === 'failed') {
+                    document.getElementById('cancel-scan-btn').style.display = 'none';
+                    document.getElementById('scan-progress-text').textContent = 'Scan failed: ' + (data.error_message || 'Unknown error');
+                    showToast('Scan failed: ' + (data.error_message || 'Unknown error'), 'error', 6000);
+                } else {
+                    const msg = 'Scan complete — ' + (data.files_processed || 0) + ' processed, ' + (data.files_failed || 0) + ' failed';
+                    document.getElementById('scan-progress-text').textContent = msg;
+                    showToast(msg, 'success', 5000);
+                }
+
+                // Auto-hide progress bar after 5 seconds
+                setTimeout(function() {
+                    document.getElementById('cancel-scan-btn').style.display = 'none';
+                    document.getElementById('scan-progress').style.display = 'none';
+                }, 5000);
+
+                // Reload stats and files immediately
+                loadStats();
+                loadFiles();
+            }
+        } catch (e) {
+            console.error('Poll error:', e);
+        }
+    }, 2000);
+}
+
+// ── Cancel Scan ──
+async function cancelScan() {
+    if (!confirm('Cancel the running scan? Already processed files will be kept.')) return;
+    // Find active scan from status API (survives page refresh)
+    let scanId = activeScanId;
+    if (!scanId) {
+        try {
+            const sResp = await fetch('/api/library/status');
+            const sData = await sResp.json();
+            scanId = sData.active_scan_id;
+        } catch (e) {}
+    }
+    if (!scanId) {
+        showToast('No active scan found', 'error');
+        return;
+    }
+    try {
+        const resp = await fetch('/api/library/scan/' + scanId, {
+            method: 'DELETE',
+            headers: {'X-API-Key': API_KEY},
+        });
+        const data = await resp.json();
+        if (data.status === 'cancelled') {
+            showToast('Scan cancelled', 'info');
+            if (scanPollInterval) clearInterval(scanPollInterval);
+            scanPollInterval = null;
+            activeScanId = null;
+            document.getElementById('cancel-scan-btn').style.display = 'none';
+            document.getElementById('scan-progress').style.display = 'none';
+            document.getElementById('scan-full-btn').disabled = false;
+            document.getElementById('scan-incremental-btn').disabled = false;
+            loadStats();
+            loadFiles();
+        } else {
+            showToast('Cancel failed: ' + (data.error || 'Unknown'), 'error');
+        }
+    } catch (e) {
+        showToast('Cancel error: ' + e.message, 'error');
+    }
+}
+
+// ── Bulk Retry ──
+async function retryAllFiltered() {
+    const status = document.getElementById('status-filter').value;
+    if (status !== 'failed') return;
+    if (!confirm('Retry ALL failed files? This may take a while and will use API credits.')) return;
+
+    const btn = document.getElementById('retry-banner-btn');
+    btn.disabled = true;
+    btn.textContent = '⏳ Retrying...';
+
+    try {
+        const params = new URLSearchParams({
+            status: status,
+            limit: '10000',
+            sort: 'updated_at',
+            order: 'desc',
+        });
+        const resp = await fetch('/api/library/files?' + params);
+        const data = await resp.json();
+        const fileIds = data.files.map(function(f) { return f.id; });
+
+        if (!fileIds.length) {
+            showToast('No files to retry', 'info');
+            btn.disabled = false;
+            btn.textContent = '🔄 Retry All Failed';
+            return;
+        }
+
+        showToast('Retrying ' + fileIds.length + ' files...', 'info', 10000);
+
+        const retryResp = await fetch('/api/library/retry', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-API-Key': API_KEY},
+            body: JSON.stringify({file_ids: fileIds, dry_run: false}),
+        });
+        const retryData = await retryResp.json();
+
+        if (retryData.error) {
+            showToast('Bulk retry failed: ' + retryData.error, 'error', 6000);
+        } else {
+            showToast('Retrying ' + retryData.retried + ' file(s)... Check back for results.', 'success', 8000);
+            loadFiles();
+            loadStats();
+        }
+    } catch (e) {
+        showToast('Bulk retry error: ' + e.message, 'error', 6000);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '🔄 Retry All Failed';
+    }
+}
+
+// ── Retry ──
+async function retryFile(fileId) {
+    showToast('Retrying file...', 'info');
+    try {
+        const resp = await fetch('/api/library/retry', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-API-Key': API_KEY},
+            body: JSON.stringify({file_ids: [fileId], dry_run: false}),
+        });
+        const data = await resp.json();
+        if (data.error) {
+            showToast('Retry failed: ' + data.error, 'error', 5000);
+        } else {
+            showToast('Retrying ' + data.retried + ' file(s)...', 'info');
+            loadFiles();
+            loadStats();
+        }
+    } catch (e) {
+        showToast('Retry error: ' + e.message, 'error', 5000);
+    }
+}
+
+
+// Check SubDL PRO mode status
+async function checkProMode() {
+    try {
+        const resp = await fetch("/api/config");
+        const data = await resp.json();
+        const proMode = data.providers && data.providers.subdl && data.providers.subdl.pro_mode;
+        const banner = document.getElementById("pro-mode-banner");
+        if (banner) banner.style.display = proMode ? "block" : "none";
+    } catch (e) {
+        console.error("PRO mode check error:", e);
+    }
+}
+checkProMode();
+
+
+// Reset Statistics
+async function resetStats() {
+    if (!confirm('⚠ WARNING: This will DELETE all library scan history and file records from the database.\n\nSubtitle files on disk will NOT be deleted.\n\nThis cannot be undone. Continue?')) return;
+    try {
+        const resp = await fetch('/api/library/reset', {
+            method: 'POST',
+            headers: {'X-API-Key': API_KEY},
+        });
+        const data = await resp.json();
+        if (data.status === 'ok') {
+            showToast('Statistics reset — ' + data.deleted + ' records removed', 'success');
+            loadStats();
+            loadFiles();
+        } else {
+            showToast('Reset failed: ' + data.error, 'error');
+        }
+    } catch (e) {
+        showToast('Reset error: ' + e.message, 'error');
+    }
+}
+
+
+// Format duration in seconds to human-readable
+function formatDuration(secs) {
+    if (secs < 0) return '-';
+    if (secs < 60) return Math.round(secs) + 's';
+    var mins = Math.floor(secs / 60);
+    var s = Math.round(secs % 60);
+    if (mins < 60) return mins + 'm ' + s + 's';
+    var hrs = Math.floor(mins / 60);
+    mins = mins % 60;
+    return hrs + 'h ' + mins + 'm';
+}
+
+// ── Utilities ──
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = String(text || '');
+    return div.innerHTML;
+}
+
+function timeAgo(date) {
+    const seconds = Math.floor((Date.now() - date) / 1000);
+    if (seconds < 60) return 'just now';
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return minutes + 'm ago';
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return hours + 'h ago';
+    const days = Math.floor(hours / 24);
+    return days + 'd ago';
+}
+
+// ── Reports Panel ──
+
+function toggleReportsPanel() {
+    const panel = document.getElementById('reports-panel');
+    const overlay = document.getElementById('reports-overlay');
+    const isOpen = panel.style.display === 'block';
+    if (isOpen) {
+        panel.style.display = 'none';
+        overlay.style.display = 'none';
+        document.getElementById('report-viewer').style.display = 'none';
+    } else {
+        panel.style.display = 'block';
+        overlay.style.display = 'block';
+        loadReportsList();
+    }
+}
+
+async function loadReportsList() {
+    const inner = document.getElementById('reports-list-inner');
+    try {
+        const resp = await fetch('/api/library/reports');
+        const data = await resp.json();
+        const reports = data.reports || [];
+        if (!reports.length) {
+            inner.innerHTML = '<em>No reports yet. Generate one to get started.</em>';
+            return;
+        }
+        inner.innerHTML = reports.map(function(r) {
+            const d = new Date(r.modified * 1000);
+            const dateStr = d.toLocaleDateString() + ' ' + d.toLocaleTimeString();
+            const size = (r.size / 1024).toFixed(1) + ' KB';
+            return '<div style="display: flex; justify-content: space-between; align-items: center; padding: 0.5rem; border-bottom: 1px solid var(--border);">' +
+                '<div style="flex: 1; cursor: pointer;" onclick="viewReport(\'' + r.name + '\')">' +
+                '<span style="font-size: 0.9rem;">📄 ' + escapeHtml(r.name) + '</span>' +
+                '<span style="font-size: 0.75rem; color: var(--text-muted); margin-left: 0.5rem;">' + dateStr + ' · ' + size + '</span>' +
+                '</div>' +
+                '<button style="background: none; border: none; color: var(--accent); cursor: pointer; font-size: 1.1rem; padding: 0 0.5rem;" title="Download" onclick="event.stopPropagation(); downloadReport(\'' + r.name + '\')">📥</button>' +
+                '</div>';
+        }).join('');
+    } catch (e) {
+        inner.innerHTML = '<span style="color: var(--error);">Failed to load reports</span>';
+    }
+}
+
+async function generateReport() {
+    const btn = document.getElementById('generate-report-btn');
+    const loading = document.getElementById('report-loading');
+    btn.disabled = true;
+    btn.textContent = '⏳ Generating...';
+    loading.style.display = 'block';
+
+    try {
+        const resp = await fetch('/api/library/report', {
+            method: 'POST',
+            headers: {'X-API-Key': API_KEY},
+        });
+        const data = await resp.json();
+        if (data.error) {
+            showToast('Report generation failed: ' + data.error, 'error', 5000);
+            return;
+        }
+        showToast('Report generated: ' + data.name, 'success', 4000);
+        loadReportsList();
+        // Auto-view the new report
+        viewReportContent(data.name, data.content);
+    } catch (e) {
+        showToast('Report error: ' + e.message, 'error', 5000);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '📊 Generate New Report';
+        loading.style.display = 'none';
+    }
+}
+
+
+async function downloadReport(name) {
+    const resp = await fetch('/api/library/report/' + encodeURIComponent(name) + '/download');
+    if (!resp.ok) return;
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+async function viewReport(name) {
+    try {
+        const resp = await fetch('/api/library/report/' + encodeURIComponent(name));
+        const data = await resp.json();
+        if (data.error) {
+            showToast('Could not load report: ' + data.error, 'error');
+            return;
+        }
+        viewReportContent(data.name, data.content);
+    } catch (e) {
+        showToast('Report load error: ' + e.message, 'error');
+    }
+}
+
+function viewReportContent(name, content) {
+    document.getElementById('report-viewer-title').textContent = name;
+    document.getElementById('report-viewer-content').textContent = content;
+    document.getElementById('report-viewer').style.display = 'block';
+    document.getElementById('reports-list').style.display = 'none';
+}
+
+function closeReportViewer() {
+    document.getElementById('report-viewer').style.display = 'none';
+    document.getElementById('reports-list').style.display = 'block';
+}
+</script>
+{% endblock %}

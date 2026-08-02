@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}Search — Subber{% endblock %}
+{% block tab_search_class %}active{% endblock %}
+{% block content %}
+<section class="search-card">
+    <h2>Find Subtitles</h2>
+    <p class="sub" style="color: var(--text-muted); margin-bottom: 0.5rem;">
+        Search multiple subtitle providers
+    </p>
+    <div class="rate-limit-badge" style="display: inline-block; margin-bottom: 1rem;">
+        Multi-provider search · Configure in <a href="/settings" style="color: var(--accent);">Settings</a>
+    </div>
+
+    <div class="form-group">
+        <label>Search by name or video path</label>
+        <div class="search-form">
+            <input type="text" id="search-query" placeholder="Show name or /path/to/video.mkv" onkeydown="if(event.key==='Enter')doSearch()">
+            <button class="btn-search" onclick="doSearch()">Search</button>
+        </div>
+        <div class="hint">Paste a video path for hash-based matching (more accurate). Type a show name for text search.</div>
+    </div>
+
+    <div id="search-results" style="margin-top: 1.5rem;"></div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+const API_KEY = '{{ api_key }}';
+let lastResults = [];
+
+async function doSearch() {
+    const input = document.getElementById('search-query').value.trim();
+    if (!input) return;
+
+    const resultsDiv = document.getElementById('search-results');
+    resultsDiv.innerHTML = '<p style="color: var(--text-muted)">Searching...</p>';
+
+    const isPath = input.startsWith('/') || input.includes('.mkv') || input.includes('.mp4');
+    const form = new FormData();
+    if (isPath) {
+        form.append('video_path', input);
+    } else {
+        form.append('query', input);
+    }
+
+    try {
+        const resp = await fetch('/api/search', { method: 'POST', headers: {'X-API-Key': API_KEY}, body: form });
+        const data = await resp.json();
+        if (data.error) throw new Error(data.error);
+
+        if (data.results.length === 0) {
+            resultsDiv.innerHTML = '<p style="color: var(--text-muted)">No results found.</p>';
+            return;
+        }
+
+        lastResults = data.results;
+        resultsDiv.innerHTML = '<p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.75rem;">' +
+            data.results.length + ' result(s) · Providers: ' + (data.providers_searched || []).join(', ') + '</p>' +
+            data.results.map((r, i) => `
+            <div class="result-item">
+                <div style="min-width: 0; flex: 1;">
+                    <div class="result-filename" title="${r.filename}">${r.filename}</div>
+                    <div class="meta">
+                        [${r.language}] · ${r.provider || '?'} · ${(r.downloads || 0).toLocaleString()} downloads · Rating: ${(r.rating || 0).toFixed(1)}
+                        ${r.hearing_impaired ? ' · HI' : ''}
+                        ${r.release_info ? ' · ' + r.release_info : ''}
+                    </div>
+                </div>
+                <button class="btn-save" style="font-size: 0.8rem; padding: 0.4rem 0.8rem; flex-shrink: 0;"
+                    onclick="downloadSub(${i}, this)">
+                    Download
+                </button>
+            </div>
+        `).join('');
+    } catch (e) {
+        resultsDiv.innerHTML = '<span style="color: var(--error)">✗ ' + e.message + '</span>';
+    }
+}
+
+async function downloadSub(idx, btn) {
+    const r = lastResults[idx];
+    if (!r) return;
+    const orig = btn.textContent;
+    btn.textContent = '...';
+    btn.disabled = true;
+    try {
+        const resp = await fetch('/api/download/' + encodeURIComponent(r.id), {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-API-Key': API_KEY},
+            body: JSON.stringify({metadata: r.metadata || {}}),
+        });
+        if (!resp.ok) {
+            const err = await resp.json();
+            throw new Error(err.detail || err.error || 'Download failed');
+        }
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = r.filename || 'subtitle.srt';
+        a.click();
+        URL.revokeObjectURL(url);
+        btn.textContent = '✓ Done';
+        btn.style.background = 'var(--success)';
+    } catch (e) {
+        btn.textContent = orig;
+        btn.disabled = false;
+        alert('Download failed: ' + e.message);
+    }
+}
+</script>
+{% endblock %}

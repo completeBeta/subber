@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block title %}Logs — Subber{% endblock %}
+{% block tab_logs_class %}active{% endblock %}
+{% block content %}
+<section class="logs-container" style="max-width: 100%; padding: 0 1rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.5rem;">
+        <h2 style="margin: 0;">📋 Logs</h2>
+        <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+            <input type="text" id="log-search" placeholder="Search logs..." oninput="loadLogs()"
+                   style="padding: 0.35rem 0.5rem; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 4px; width: 180px;">
+            <select id="log-level" onchange="loadLogs()"
+                    style="padding: 0.35rem 0.5rem; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 4px;">
+                <option value="">All Levels</option>
+                <option value="DEBUG">DEBUG</option>
+                <option value="INFO">INFO</option>
+                <option value="WARNING">WARNING</option>
+                <option value="ERROR">ERROR</option>
+            </select>
+            <select id="log-lines" onchange="loadLogs()"
+                    style="padding: 0.35rem 0.5rem; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 4px;">
+                <option value="100">100 lines</option>
+                <option value="200" selected>200 lines</option>
+                <option value="500">500 lines</option>
+                <option value="1000">1000 lines</option>
+                <option value="0">All lines</option>
+            </select>
+            <label class="checkbox-label" style="display: flex; align-items: center; gap: 0.25rem; cursor: pointer; font-size: 0.85rem;">
+                <input type="checkbox" id="log-autorefresh" onchange="toggleAutoRefresh()"> Auto-refresh
+            </label>
+            <button class="btn-save" onclick="loadLogs()" style="padding: 0.35rem 0.8rem;">🔄 Refresh</button>
+            <button class="btn-save" onclick="clearLogsFilter()" style="padding: 0.35rem 0.8rem; background: var(--text-muted);">Clear</button>
+            <a href="/api/logs/download" class="btn-save" style="padding: 0.35rem 0.8rem; background: var(--accent); text-decoration: none; display: inline-block;">⬇ Download Log</a>
+        </div>
+    </div>
+
+    <!-- API Stats Panel -->
+    <div id="api-stats-panel" style="background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 6px; padding: 0.6rem 0.8rem; margin-bottom: 0.5rem; display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; font-size: 0.82rem;">
+        <span style="color: var(--text-muted);">📊 API Calls Today:</span>
+        <span id="api-stats-content" style="color: var(--text);">Loading...</span>
+    </div>
+
+    <div id="log-info" style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.5rem;">
+        Loading...
+    </div>
+
+    <div id="log-viewer" style="background: #0a0a0f; border: 1px solid var(--border); border-radius: 6px; padding: 0.8rem; font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace; font-size: 0.78rem; line-height: 1.5; min-height: 5rem; max-height: 35rem; overflow-y: auto; white-space: pre-wrap; word-break: break-all; color: #c0c0c0;">
+        Loading...
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let autoRefreshTimer = null;
+
+document.addEventListener('DOMContentLoaded', () => {
+    loadLogs();
+    loadApiStats();
+});
+
+function toggleAutoRefresh() {
+    const enabled = document.getElementById('log-autorefresh').checked;
+    if (enabled) {
+        autoRefreshTimer = setInterval(() => { loadLogs(); loadApiStats(); }, 5000);
+    } else {
+        clearInterval(autoRefreshTimer);
+        autoRefreshTimer = null;
+    }
+}
+
+function clearLogsFilter() {
+    document.getElementById('log-search').value = '';
+    document.getElementById('log-level').value = '';
+    document.getElementById('log-lines').value = '200';
+    loadLogs();
+}
+
+async function loadLogs() {
+    const search = document.getElementById('log-search').value;
+    const level = document.getElementById('log-level').value;
+    const lines = document.getElementById('log-lines').value;
+
+    try {
+        const params = new URLSearchParams({ lines, search, level });
+        const resp = await fetch('/api/logs?' + params);
+        const data = await resp.json();
+
+        const sizeMB = (data.file_size / (1024 * 1024)).toFixed(1);
+        document.getElementById('log-info').textContent =
+            `Showing ${data.showing} of ${data.total} lines · ${data.file} (${sizeMB} MB)`;
+
+        const viewer = document.getElementById('log-viewer');
+        if (!data.lines.length) {
+            viewer.innerHTML = '<span style="color: #666;">No log lines match your filters.</span>';
+            return;
+        }
+
+        viewer.innerHTML = data.lines.map(line => {
+            let cls = '';
+            if (line.includes('[ERROR]')) cls = 'color: #ff6b6b;';
+            else if (line.includes('[WARNING]')) cls = 'color: #f59e0b;';
+            else if (line.includes('[DEBUG]')) cls = 'color: #6c8cff;';
+            else if (line.includes('[INFO]')) cls = 'color: #4ade80;';
+            return '<span style="' + cls + '">' + escapeHtml(line) + '</span>';
+        }).join('\n');
+
+        viewer.scrollTop = viewer.scrollHeight;
+    } catch (e) {
+        document.getElementById('log-viewer').innerHTML =
+            '<span style="color: var(--error);">Failed to load logs: ' + escapeHtml(e.message) + '</span>';
+    }
+}
+
+async function loadApiStats() {
+    try {
+        const resp = await fetch('/api/logs/stats');
+        const data = await resp.json();
+        const today = data.today || {};
+
+        if (!Object.keys(today).length) {
+            document.getElementById('api-stats-content').textContent = 'No API calls today';
+            return;
+        }
+
+        const parts = [];
+        for (const [provider, counts] of Object.entries(today)) {
+            const s = counts.searches || 0;
+            const d = counts.downloads || 0;
+            parts.push(`${provider}: ${s} search${s !== 1 ? 'es' : ''}, ${d} download${d !== 1 ? 's' : ''}`);
+        }
+        document.getElementById('api-stats-content').textContent = parts.join(' · ');
+    } catch (e) {
+        document.getElementById('api-stats-content').textContent = 'Could not load stats';
+    }
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = String(text || '');
+    return div.innerHTML;
+}
+</script>
+{% endblock %}

@@ -1,0 +1,74 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "subber"
+version = "0.1.0"
+description = "Subtitle grabber and translator using LLMs"
+readme = "README.md"
+license = {file = "LICENSE"}
+requires-python = ">=3.10"
+authors = [
+    {name = "ChinWoo"},
+]
+keywords = ["subtitle", "translation", "llm", "anime", "srt", "ass"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Environment :: Web Environment",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Text Processing :: Linguistic",
+]
+
+dependencies = [
+    "click>=8.0",
+    "fastapi>=0.100",
+    "ffsubsync>=0.4",
+    "beautifulsoup4>=4.12",
+    "lxml>=5.0",
+    "httpx>=0.24",
+    "jinja2>=3.1",
+    "langdetect>=1.0",
+    "pysubs2>=1.7",
+    "python-multipart>=0.0.6",
+    "pyyaml>=6.0",
+    "uvicorn>=0.22",
+    "watchfiles>=0.20",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "httpx",              # for TestClient
+    "ruff>=0.1",
+    "mypy>=1.0",
+]
+
+[project.scripts]
+subber = "subber.cli:main"
+subber-web = "subber.web:main"
+
+[project.urls]
+Homepage = "https://github.com/completeBeta/Subber"
+Repository = "https://github.com/completeBeta/Subber"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/subber"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

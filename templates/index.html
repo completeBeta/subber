@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}Subber — Subtitle Translator{% endblock %}
+{% block tab_translate_class %}active{% endblock %}
+{% block content %}
+    <!-- Upload Section -->
+    <section class="upload-card">
+        <h2>Translate Subtitles</h2>
+
+        <form id="upload-form" enctype="multipart/form-data">
+            <!-- Drag & drop zone -->
+            <div class="drop-zone" id="drop-zone">
+                <div class="drop-content">
+                    <span class="drop-icon">📁</span>
+                    <p>Drag & drop subtitle files here</p>
+                    <p class="sub">.srt, .ass, .vtt, .zip — multiple files OK</p>
+                </div>
+                <input type="file" id="file-input" name="file" accept=".srt,.ass,.ssa,.vtt,.zip" multiple hidden>
+            </div>
+
+            <div class="file-info" id="file-info" style="display:none">
+                <span class="file-name" id="file-name"></span>
+                <span class="file-count" id="file-count" style="color: var(--text-muted); font-size: 0.8rem; margin-left: 0.5rem; display: none;"></span>
+                <button type="button" class="btn-remove" id="btn-remove" title="Remove">✕</button>
+            </div>
+
+            <!-- Options row -->
+            <div class="options-row">
+                <div class="option">
+                    <label for="source-lang">From</label>
+                    <select id="source-lang" name="source_lang">
+                        <option value="auto" selected>Auto-detect</option>
+                        <option value="de">German</option>
+                        <option value="ja">Japanese</option>
+                        <option value="fr">French</option>
+                        <option value="es">Spanish</option>
+                        <option value="it">Italian</option>
+                        <option value="pt">Portuguese</option>
+                        <option value="ru">Russian</option>
+                        <option value="zh">Chinese</option>
+                        <option value="ko">Korean</option>
+                        <option value="ar">Arabic</option>
+                    </select>
+                </div>
+
+                <div class="arrow">→</div>
+
+                <div class="option">
+                    <label for="target-lang">To</label>
+                    <select id="target-lang" name="target_lang">
+                        <option value="en" selected>English</option>
+                        <option value="de">German</option>
+                        <option value="ja">Japanese</option>
+                        <option value="fr">French</option>
+                        <option value="es">Spanish</option>
+                        <option value="it">Italian</option>
+                        <option value="pt">Portuguese</option>
+                        <option value="ru">Russian</option>
+                        <option value="zh">Chinese</option>
+                        <option value="ko">Korean</option>
+                    </select>
+                </div>
+            </div>
+
+            <button type="submit" class="btn-primary" id="btn-translate" disabled>
+                Translate
+            </button>
+            <button type="button" class="btn-cancel" id="btn-cancel" style="display:none">
+                Cancel
+            </button>
+        </form>
+
+        <!-- Progress -->
+        <div class="progress-section" id="progress-section" style="display:none">
+            <div class="progress-bar">
+                <div class="progress-fill" id="progress-fill"></div>
+            </div>
+            <p class="progress-text" id="progress-text">Translating...</p>
+        </div>
+
+        <!-- Result -->
+        <div class="result-section" id="result-section" style="display:none">
+            <div class="result-success" id="result-success">
+                <span class="result-icon">✓</span>
+                <span id="result-msg">Translation complete!</span>
+            </div>
+            <div class="result-error" id="result-error" style="display:none">
+                <span class="result-icon">✗</span>
+                <span id="error-msg"></span>
+            </div>
+            <a class="btn-download" id="btn-download" href="#" download>
+                Download Translated File
+            </a>
+        </div>
+    </section>
+
+    <!-- Recent Jobs -->
+    <section class="history-card">
+        <h2>Recent Translations</h2>
+        <div id="history-list">
+            <p class="empty">No translations yet.</p>
+        </div>
+        <div style="margin-top: 0.75rem; text-align: center; display: none;" id="history-clear-row">
+            <button class="btn" onclick="clearHistory()" style="padding: 0.3rem 1rem; border: 1px solid var(--border); 
+                border-radius: 4px; cursor: pointer; font-size: 0.85rem; background: transparent; color: var(--text-muted);">Clear History</button>
+        </div>
+    </section>
+{% endblock %}
+{% block scripts %}
+<script src="/static/app.js?v=3"></script>
+{% endblock %}

@@ -1,0 +1,18 @@
+services:
+  subber:
+    build: .
+    container_name: subber
+    ports:
+    - 8676:8676
+    volumes:
+    - ./uploads:/app/uploads
+    - ./config:/app/config
+    - ./data:/app/data
+    # Uncomment and set your media paths:
+    # - /path/to/your/media:/mnt/library:rw
+    # - /mnt/smb-share:/mnt/smb-share:rw  # SMB/CIFS example
+    environment:
+    - SUBBER_CONFIG=/app/config/config.yaml
+    privileged: true  # Required for SMB/CIFS mount support
+    network_mode: host
+    restart: unless-stopped

@@ -1,0 +1,1023 @@
+{% extends "base.html" %}
+{% block title %}Grab — Subber{% endblock %}
+{% block tab_grab_class %}active{% endblock %}
+{% block content %}
+<section class="grab-card">
+    <h2>Grab Subtitles</h2>
+    <p class="sub" style="color: var(--text-muted); margin-bottom: 0.5rem;">
+        Upload a video — we'll find, sync, and translate subtitles automatically.
+    </p>
+    <div class="rate-limit-badge" style="display: inline-block; margin-bottom: 1rem;">
+        Pipeline: probe embedded → search 5+ providers → sync → translate
+    </div>
+
+    <div class="grab-flow" id="grab-zone">
+        <div class="upload-area" id="drop-zone" style="
+            border: 2px dashed var(--border);
+            border-radius: 8px;
+            padding: 2rem;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color 0.2s;
+        ">
+            <p style="font-size: 1.1rem; margin-bottom: 0.5rem;">📁 Drag & drop video files here</p>
+            <p class="hint" style="color: var(--text-muted);">.mkv .mp4 .avi .mov .webm — or a .zip of videos</p>
+            <input type="file" id="video-file" accept="video/*,.zip" multiple style="display:none"
+                   onchange="handleFiles(this.files)">
+            <button class="btn" style="margin-top: 0.5rem;"
+                    onclick="document.getElementById('video-file').click()">
+                Browse...
+            </button>
+        </div>
+
+        <div class="grab-options" style="margin-top: 1rem; display: flex; gap: 1.5rem; align-items: center;">
+            <label class="checkbox-label" style="display: flex; align-items: center; gap: 0.3rem; cursor: pointer;">
+                <input type="checkbox" id="opt-sync" checked> Auto-sync with ffsubsync
+            </label>
+        </div>
+
+        <div id="file-confirm" style="margin-top: 1rem; display: none; overflow: hidden; max-width: 100%;">
+            <div style="
+                background: rgba(var(--accent-rgb, 59, 130, 246), 0.08);
+                border: 1px solid var(--accent);
+                border-radius: 8px;
+                padding: 1rem;
+            ">
+                <p id="confirm-text" style="margin: 0 0 0.75rem 0; word-break: break-all; overflow-wrap: break-word; max-width: 100%; line-height: 1.4;"></p>
+                <button class="btn btn-accent" id="btn-start" style="
+                    background: var(--accent); color: white; padding: 0.5rem 1rem;
+                    border: none; border-radius: 4px; cursor: pointer; font-size: 0.9rem;
+                ">Start Processing</button>
+                <button class="btn" id="btn-clear" style="
+                    margin-left: 0.5rem; padding: 0.5rem 1rem;
+                    border: 1px solid var(--border); border-radius: 4px;
+                    cursor: pointer; font-size: 0.9rem; background: transparent; color: var(--text-muted);
+                ">Clear</button>
+            </div>
+        </div>
+
+        <div id="file-list" style="margin-top: 1rem;"></div>
+
+        <details id="grab-log" style="margin-top: 1rem; display: none;">
+            <summary style="cursor: pointer; color: var(--text-muted); font-size: 0.85rem;">
+                <span id="grab-log-summary">Pipeline log</span>
+            </summary>
+            <div id="grab-steps" style="margin-top: 0.5rem; max-height: 300px; overflow-y: auto; padding: 0.5rem; background: var(--surface, #1a1a2e); border-radius: 6px;"></div>
+        </details>
+
+        <div id="grab-results" style="margin-top: 1rem;"></div>
+        <div id="grab-add-another" style="margin-top: 1rem; display: none; text-align: center;">
+            <button class="btn btn-accent" onclick="resetGrabUI()" style="padding: 0.5rem 2rem;">+ Add Another</button>
+            <button class="btn" onclick="resetGrabUI()" style="margin-left: 0.5rem; padding: 0.5rem 1rem; 
+                border: 1px solid var(--border); border-radius: 4px; cursor: pointer; 
+                font-size: 0.9rem; background: transparent; color: var(--text-muted);">Clear History</button>
+        </div>
+
+        <hr style="margin: 2rem 0 1rem; border-color: var(--border); opacity: 0.4;">
+
+        <div style="margin-top: 1rem;">
+            <h3 style="margin-bottom: 0.5rem;">🎯 Sync Video + Subtitle</h3>
+            <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 0.75rem;">
+                Drop a video and matching subtitle file — we'll sync them using ffsubsync.
+                <br><span style="color: var(--text-muted);">If auto-detection fails, set a manual offset below.</span>
+            </p>
+            <div style="margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem;">
+                <label style="font-size: 0.85rem; color: var(--text-muted); white-space: nowrap;">Manual offset:</label>
+                <input type="number" id="sync-manual-offset" value="0" step="0.1" 
+                       style="width: 80px; background: var(--bg); border: 1px solid var(--border); 
+                              color: var(--text); border-radius: 4px; padding: 0.3rem; font-size: 0.85rem;" 
+                       placeholder="0.0">
+                <span style="font-size: 0.8rem; color: var(--text-muted);">seconds (negative = shift earlier)</span>
+            </div>
+            <div class="upload-area" id="sync-drop-zone" style="
+                border: 2px dashed var(--border);
+                border-radius: 8px;
+                padding: 1.5rem;
+                text-align: center;
+                cursor: pointer;
+                transition: border-color 0.2s;
+            ">
+                <p style="font-size: 1rem; margin-bottom: 0.3rem;">🎬 📝 Drop video + subtitle file here</p>
+                <p class="hint" style="color: var(--text-muted); font-size: 0.8rem;">
+                    .mkv + .srt/.ass pair — drag both at once
+                </p>
+                <input type="file" id="sync-files" accept="video/*,.srt,.ass,.vtt" multiple style="display:none"
+                       onchange="handleSyncFiles(this.files)">
+                <button class="btn" style="margin-top: 0.5rem; font-size: 0.85rem;"
+                        onclick="document.getElementById('sync-files').click()">
+                    Browse...
+                </button>
+            </div>
+            <div id="sync-status" style="margin-top: 0.75rem; font-size: 0.85rem; color: var(--text-muted);"></div>
+            <div id="sync-result" style="margin-top: 0.5rem;"></div>
+        </div>
+    </div>
+</section>
+
+<style>
+    .upload-area.dragover {
+        border-color: var(--accent) !important;
+        background: rgba(var(--accent-rgb, 59, 130, 246), 0.05);
+    }
+    .file-item {
+        word-break: break-word;
+        overflow: hidden;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.35rem 0.5rem;
+        border-radius: 4px;
+        margin: 0.2rem 0;
+        font-size: 0.9rem;
+        background: rgba(255,255,255,0.03);
+    }
+    .file-item .status { font-weight: bold; min-width: 1.2rem; }
+    .file-item .status.ok { color: var(--success, #22c55e); }
+    .file-item .status.fail { color: var(--error, #ef4444); }
+    .file-item .status.pending { color: var(--text-muted, #9ca3af); }
+
+    /* Spinner animation */
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+    .spinner {
+        display: inline-block;
+        width: 14px;
+        height: 14px;
+        border: 2px solid var(--text-muted, #9ca3af);
+        border-top-color: var(--accent, #3b82f6);
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+        vertical-align: middle;
+        margin-right: 2px;
+    }
+    .status.processing {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+    }
+
+    /* Result card */
+    .result-card {
+        background: rgba(255,255,255,0.03);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 0.75rem 1rem;
+        margin: 0.5rem 0;
+    }
+    .result-card.success { border-color: var(--success, #22c55e); }
+    .result-card.fail { border-color: var(--error, #ef4444); }
+    .result-card .result-name {
+        word-break: break-word;
+        overflow: hidden;
+        font-weight: 600;
+        margin-bottom: 0.25rem;
+        word-break: break-all;
+    }
+    .result-card .result-info {
+        font-size: 0.85rem;
+        color: var(--text-muted);
+        margin-bottom: 0.25rem;
+    }
+    .result-card .result-link {
+        display: inline-block;
+        margin-top: 0.25rem;
+        color: var(--accent);
+        font-size: 0.85rem;
+        text-decoration: none;
+    }
+    .result-card .result-link:hover { text-decoration: underline; }
+</style>
+
+
+<script>
+const dropZone = document.getElementById('drop-zone');
+let pendingFiles = [];
+
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.classList.remove('dragover');
+    const files = e.dataTransfer.files;
+    if (files.length) handleFiles(files);
+});
+
+function handleFiles(fileList) {
+    if (!fileList || !fileList.length) return;
+    pendingFiles = Array.from(fileList);
+    showConfirm();
+}
+
+// ── Confirmation screen ──
+
+function showConfirm() {
+    if (!pendingFiles.length) return;
+    const confirmDiv = document.getElementById('file-confirm');
+    const confirmText = document.getElementById('confirm-text');
+
+    if (pendingFiles.length === 1) {
+        const f = pendingFiles[0];
+        const sizeStr = formatSize(f.size);
+        if (f.name.toLowerCase().endsWith('.zip')) {
+            confirmText.textContent = `📦 ${f.name} (${sizeStr}) — will process as batch zip`;
+        } else {
+            confirmText.textContent = `🎬 ${f.name} (${sizeStr})`;
+        }
+    } else {
+        const totalSize = pendingFiles.reduce((s, f) => s + f.size, 0);
+        confirmText.textContent = `📁 ${pendingFiles.length} files selected (${formatSize(totalSize)})`;
+    }
+
+    document.getElementById('file-list').innerHTML = '';
+    document.getElementById('grab-steps').innerHTML = '';
+    document.getElementById('grab-results').innerHTML = '';
+    confirmDiv.style.display = 'block';
+
+    document.getElementById('btn-start').onclick = startProcessing;
+    document.getElementById('btn-clear').onclick = () => {
+        pendingFiles = [];
+        confirmDiv.style.display = 'none';
+        document.getElementById('video-file').value = '';
+    };
+}
+
+// ── Process control ──
+
+async function startProcessing() {
+    if (!pendingFiles.length) return;
+    try {
+    document.getElementById('file-confirm').style.display = 'none';
+
+    const files = pendingFiles;
+    pendingFiles = [];
+
+    // Single zip
+    if (files.length === 1 && files[0].name.toLowerCase().endsWith('.zip')) {
+        await handleBatchZip(files[0]);
+        return;
+    }
+
+    // Split zips and videos
+    const zips = files.filter(f => f.name.toLowerCase().endsWith('.zip'));
+    const videos = files.filter(f => !f.name.toLowerCase().endsWith('.zip'));
+
+    if (zips.length && videos.length) {
+        document.getElementById('grab-steps').innerHTML =
+            '<p style="color: var(--text-muted);">📦 Processing zips first, then videos...</p>';
+        for (const zf of zips) await handleBatchZip(zf);
+        if (videos.length) await processSequential(videos);
+    } else if (zips.length) {
+        document.getElementById('grab-steps').innerHTML =
+            '<p style="color: var(--text-muted);">📦 Processing zip batches...</p>';
+        for (const zf of zips) {
+            // Each zip result shows inside handleBatchZip
+        }
+    } else {
+        await processSequential(videos);
+    }
+    } catch (e) {
+        console.error('[START] Unhandled error:', e);
+        document.getElementById('grab-steps').innerHTML = '<p style="color: var(--error);">✗ Error: ' + e.message + '</p>';
+        document.getElementById('file-confirm').style.display = 'block';
+    }
+}
+
+// ── Batch zip handler (XHR streaming upload + async job polling) ──
+
+async function handleBatchZip(zipFile) {
+    const stepsDiv = document.getElementById('grab-steps');
+    const resultsDiv = document.getElementById('grab-results');
+    const fileListDiv = document.getElementById('file-list');
+    const logEl = document.getElementById('grab-log');
+
+    console.log('[BATCH] handleBatchZip called:', zipFile.name, formatSize(zipFile.size));
+
+    fileListDiv.innerHTML = '';
+
+    // Always show the log container so steps/errors are visible
+    logEl.style.display = 'block';
+
+    const sync = document.getElementById('opt-sync').checked;
+    const sizeStr = formatSize(zipFile.size);
+
+    // Show uploading immediately
+    stepsDiv.innerHTML = '<p style="color: var(--text-muted);"><span class="spinner"></span> Uploading ' + zipFile.name + ' (' + sizeStr + ')...</p>';
+    console.log('[BATCH] Uploading message set');
+
+    // XHR streaming upload
+    let batchData;
+    try {
+        batchData = await new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            const form = new FormData();
+            form.append('file', zipFile);
+            form.append('sync', sync);
+
+            xhr.upload.addEventListener('progress', (e) => {
+                if (e.lengthComputable) {
+                    const pct = Math.round((e.loaded / e.total) * 100);
+                    stepsDiv.innerHTML = '<p style="color: var(--text-muted);"><span class="spinner"></span> Uploading ' + zipFile.name + ' \u2014 ' + pct + '% (' + formatSize(e.loaded) + ' / ' + sizeStr + ')</p>';
+                }
+            });
+
+            xhr.addEventListener('load', () => {
+                console.log('[BATCH] XHR loaded, status:', xhr.status);
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    try {
+                        const data = JSON.parse(xhr.responseText);
+                        console.log('[BATCH] Parsed response:', data);
+                        resolve(data);
+                    } catch (err) {
+                        console.error('[BATCH] JSON parse error:', err);
+                        reject(new Error('Invalid server response'));
+                    }
+                } else {
+                    let errText = 'Batch failed (HTTP ' + xhr.status + ')';
+                    try { var data = JSON.parse(xhr.responseText); errText = data.error || data.detail || errText; } catch (_) {}
+                    console.error('[BATCH] Server error:', errText);
+                    reject(new Error(errText));
+                }
+            });
+
+            xhr.addEventListener('error', () => {
+                console.error('[BATCH] XHR network error');
+                reject(new Error('Network error'));
+            });
+
+            xhr.open('POST', '/api/grab/batch');
+            xhr.timeout = 1800000;  // 30 min for large extractions
+            xhr.addEventListener('timeout', () => {
+                console.error('[BATCH] XHR timed out');
+                reject(new Error('Upload timed out — file may be too large'));
+            });
+            console.log('[BATCH] Sending XHR...');
+            xhr.send(form);
+        });
+    } catch (e) {
+        console.error('[BATCH] Upload failed:', e.message);
+        logEl.open = true;
+        stepsDiv.innerHTML = '<p style="color: var(--error);">\u2717 Upload failed: ' + e.message + '</p>';
+        return;
+    }
+
+    console.log('[BATCH] Got batch data:', batchData);
+    const { batch_id, total, jobs } = batchData;
+    if (!jobs || !jobs.length) {
+        logEl.open = true;
+        stepsDiv.innerHTML = '<p style="color: var(--error);">\u2717 No video files found in zip</p>';
+        return;
+    }
+
+    // Build per-file progress UI
+    console.log('[BATCH] Building UI for', jobs.length, 'jobs');
+    let fileHTML = '';
+    for (let i = 0; i < jobs.length; i++) {
+        const j = jobs[i];
+        fileHTML += '<div class="file-item" id="batch-item-' + i + '">' +
+            '<span class="status" id="batch-status-' + i + '">\u25cc</span>' +
+            '<span style="word-break: break-all; overflow: hidden; text-overflow: ellipsis; min-width: 0; white-space: nowrap;">' + j.filename + '</span>' +
+            '<span style="color: var(--text-muted); font-size: 0.8rem; margin-left: 0.5rem;" id="batch-info-' + i + '">' + j.size_mb + ' MB</span>' +
+            '<div id="batch-progress-' + i + '" style="flex: 1; max-width: 150px; height: 4px; background: rgba(255,255,255,0.05); border-radius: 2px; margin-left: 0.5rem;">' +
+                '<div id="batch-bar-' + i + '" style="height: 100%; background: var(--accent); border-radius: 2px; width: 0%; transition: width 0.3s;"></div>' +
+            '</div>' +
+        '</div>';
+    }
+    fileListDiv.innerHTML = fileHTML;
+
+    stepsDiv.innerHTML = '<p style="color: var(--text-muted);">' + total + ' file' + (total > 1 ? 's' : '') + ' in ' + zipFile.name + ' \u2014 processing...</p>';
+    logEl.open = false;
+    document.getElementById('grab-log-summary').textContent = 'Batch: ' + total + ' file' + (total > 1 ? 's' : '');
+
+    // Poll batch status
+    console.log('[BATCH] Starting poll for batch:', batch_id);
+    const POLL_INTERVAL = 2000;
+    const batchResult = await new Promise((resolve) => {
+        const interval = setInterval(async () => {
+            try {
+                const resp = await fetch('/api/grab/batch/' + batch_id);
+                if (!resp.ok) { clearInterval(interval); resolve({ error: 'Status check failed' }); return; }
+                const data = await resp.json();
+
+                for (let i = 0; i < (data.jobs || []).length; i++) {
+                    const j = data.jobs[i];
+                    const statusEl = document.getElementById('batch-status-' + i);
+                    const infoEl = document.getElementById('batch-info-' + i);
+                    const barEl = document.getElementById('batch-bar-' + i);
+                    if (!statusEl) continue;
+
+                    if (j.status === 'done') {
+                        statusEl.innerHTML = '\u2713';
+                        statusEl.className = 'status ok';
+                        infoEl.textContent = j.model_used ? 'auto-translated (' + j.model_used + ')' : 'ready';
+                        if (barEl) barEl.style.width = '100%';
+                    } else if (j.status === 'failed') {
+                        statusEl.innerHTML = '\u2717';
+                        statusEl.className = 'status fail';
+                        infoEl.textContent = j.error || 'Failed';
+                        if (barEl) barEl.style.width = '100%';
+                    } else {
+                        statusEl.innerHTML = '<span class="spinner"></span>';
+                        statusEl.className = 'status processing';
+                        infoEl.textContent = j.status.replace(/_/g, ' ');
+                        if (barEl) barEl.style.width = (j.progress_pct || 0) + '%';
+                    }
+                }
+
+                if (data.status === 'complete') {
+                    clearInterval(interval);
+                    resolve(data);
+                }
+            } catch (_) { /* keep polling */ }
+        }, POLL_INTERVAL);
+        setTimeout(() => { clearInterval(interval); resolve({ error: 'Timed out after 15 minutes' }); }, 900000);
+    });
+
+    console.log('[BATCH] Poll complete:', batchResult);
+    if (batchResult.error) {
+        logEl.open = true;
+        stepsDiv.innerHTML = '<p style="color: var(--error);">\u2717 ' + batchResult.error + '</p>';
+        return;
+    }
+
+    const doneJobs = (batchResult.jobs || []).filter(function(j) { return j.status === 'done'; });
+    const failedJobs = (batchResult.jobs || []).filter(function(j) { return j.status === 'failed'; });
+    logEl.open = true;
+    document.getElementById('grab-log-summary').textContent = 'Batch complete \u2014 ' + doneJobs.length + ' succeeded';
+    stepsDiv.innerHTML = '<p style="color: var(--success, #22c55e);">\u2713 Batch complete \u2014 ' + doneJobs.length + ' succeeded, ' + failedJobs.length + ' failed</p>';
+
+    for (let k = 0; k < doneJobs.length; k++) {
+        const j = doneJobs[k];
+        if (j.download_url) {
+            const card = document.createElement('div');
+            card.className = 'result-card success';
+            const modelInfo = j.model_used ? ' (' + j.model_used + ')' : '';
+            card.innerHTML = '<div class="result-name">' + j.filename + '</div>' +
+                '<div class="result-info">auto-translated' + modelInfo + '</div>' +
+                '<a class="result-link" href="' + j.download_url + '" download="' + j.filename.replace(/\.[^.]+$/, '.en.ass') + '">Download Subtitles</a>';
+            resultsDiv.appendChild(card);
+        }
+    }
+    console.log('[BATCH] Done!');
+}
+
+
+// ── Concurrent video processing (all files at once) ──
+
+async function processSequential(files) {
+    const stepsDiv = document.getElementById('grab-steps');
+    const resultsDiv = document.getElementById('grab-results');
+    const fileListDiv = document.getElementById('file-list');
+    const logEl = document.getElementById('grab-log');
+
+    resultsDiv.innerHTML = '';
+    logEl.style.display = 'block';
+
+    // Build file list UI
+    fileListDiv.innerHTML = files.map((f, i) =>
+        `<div class="file-item" id="file-item-${i}">
+            <span class="status" id="status-${i}">◌</span>
+            <span style="word-break: break-all; overflow: hidden; text-overflow: ellipsis; min-width: 0; white-space: nowrap;">${f.name}</span>
+            <span style="color: var(--text-muted); font-size: 0.8rem; margin-left: 0.5rem;" id="info-${i}"></span>
+            <div id="progress-${i}" style="flex: 1; max-width: 150px; height: 4px; background: rgba(255,255,255,0.05); border-radius: 2px; margin-left: 0.5rem;">
+                <div id="progress-bar-${i}" style="height: 100%; background: var(--accent); border-radius: 2px; width: 0%; transition: width 0.3s;"></div>
+            </div>
+        </div>`
+    ).join('');
+
+    const sync = document.getElementById('opt-sync').checked;
+    document.getElementById('grab-log-summary').textContent = `Processing ${files.length} file${files.length > 1 ? 's' : ''} concurrently...`;
+
+    // Phase 1: Upload all files concurrently
+    stepsDiv.innerHTML = `<p style="color: var(--text-muted);"><span class="spinner"></span> Uploading ${files.length} file${files.length > 1 ? 's' : ''}...</p>`;
+
+    const jobs = await Promise.all(files.map(async (file, i) => {
+        const statusEl = document.getElementById(`status-${i}`);
+        const infoEl = document.getElementById(`info-${i}`);
+        const barEl = document.getElementById(`progress-bar-${i}`);
+
+        statusEl.innerHTML = '<span class="spinner"></span>';
+        statusEl.className = 'status processing';
+        infoEl.textContent = `Uploading ${formatSize(file.size)}...`;
+
+        const form = new FormData();
+        form.append('video_file', file);
+        form.append('sync', sync);
+
+        try {
+            const jobId = await new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                xhr.addEventListener('load', () => {
+                    if (xhr.status >= 200 && xhr.status < 300) {
+                        try { resolve(JSON.parse(xhr.responseText).job_id); }
+                        catch (_) { reject(new Error('Invalid server response')); }
+                    } else {
+                        let err = `Server error (HTTP ${xhr.status})`;
+                        try { err = JSON.parse(xhr.responseText).error || err; } catch (_) {}
+                        reject(new Error(err));
+                    }
+                });
+                xhr.addEventListener('error', () => reject(new Error('Network error')));
+                xhr.addEventListener('timeout', () => reject(new Error('Upload timed out')));
+                xhr.open('POST', '/api/grab');
+                xhr.timeout = 1800000;
+                xhr.send(form);
+            });
+
+            infoEl.textContent = 'Uploaded';
+            barEl.style.width = '10%';
+            return { index: i, jobId, file, statusEl, infoEl, barEl, ok: true };
+        } catch (e) {
+            statusEl.innerHTML = '✗';
+            statusEl.className = 'status fail';
+            infoEl.textContent = e.message;
+            return { index: i, file, ok: false, error: e.message };
+        }
+    }));
+
+    const active = jobs.filter(j => j.ok);
+    const failed = jobs.filter(j => !j.ok);
+
+    if (failed.length) {
+        stepsDiv.innerHTML = `<p style="color: var(--error);">✗ ${failed.length} upload${failed.length > 1 ? 's' : ''} failed</p>`;
+    }
+
+    if (!active.length) return;
+
+    stepsDiv.innerHTML = `<p style="color: var(--text-muted);"><span class="spinner"></span> Processing ${active.length} file${active.length > 1 ? 's' : ''}...</p>`;
+
+    // Phase 2: Poll all jobs concurrently
+    const POLL_INTERVAL = 1500;
+    const results = await Promise.all(active.map(j => new Promise((resolve) => {
+        let lastStepCount = 0;
+        const interval = setInterval(async () => {
+            try {
+                const resp = await fetch(`/api/grab/${j.jobId}`);
+                if (!resp.ok) { clearInterval(interval); resolve({ ...j, error: 'Status check failed' }); return; }
+                const data = await resp.json();
+
+                j.barEl.style.width = (data.progress_pct || 0) + '%';
+                j.statusEl.innerHTML = data.status === 'done' ? '✓' : '<span class="spinner"></span>';
+                j.statusEl.className = data.status === 'done' ? 'status ok' : data.status === 'failed' ? 'status fail' : 'status processing';
+                j.infoEl.textContent = data.status === 'done'
+                    ? (data.needs_translation ? `auto-translated (${data.model_used || 'LLM'})` : 'ready')
+                    : data.status.replace(/_/g, ' ');
+
+                if (data.steps && data.steps.length > lastStepCount) {
+                    for (let s = lastStepCount; s < data.steps.length; s++) {
+                        const step = data.steps[s];
+                        const color = step.startsWith('✗') ? 'var(--error)' :
+                                      step.startsWith('✓') ? 'var(--success, #22c55e)' : 'var(--text-muted)';
+                        const shortName = j.file.name.length > 30 ? j.file.name.substring(0, 27) + '...' : j.file.name;
+                        stepsDiv.innerHTML += `<p style="margin: 0.15rem 0; color: ${color}; font-size: 0.85rem;">[${shortName}] ${step}</p>`;
+                    }
+                    lastStepCount = data.steps.length;
+                    stepsDiv.scrollTop = stepsDiv.scrollHeight;
+                }
+
+                if (data.status === 'done' || data.status === 'failed') {
+                    clearInterval(interval);
+                    resolve({ ...j, download_url: data.download_url, filename: data.filename,
+                              model_used: data.model_used, embedded_langs: data.embedded_langs,
+                              needs_translation: data.needs_translation, error: data.error });
+                }
+            } catch (_) { /* keep polling */ }
+        }, POLL_INTERVAL);
+        setTimeout(() => { clearInterval(interval); resolve({ ...j, error: 'Timed out' }); }, 900000);
+    })));
+
+    // Phase 3: Show results
+    const doneJobs = results.filter(r => !r.error && r.download_url);
+    const failJobs = results.filter(r => r.error);
+
+    for (const r of results) {
+        const i = r.index;
+        const s = document.getElementById(`status-${i}`);
+        const info = document.getElementById(`info-${i}`);
+        const bar = document.getElementById(`progress-bar-${i}`);
+
+        if (r.download_url) {
+            s.innerHTML = '✓';
+            s.className = 'status ok';
+            info.textContent = r.needs_translation ? `auto-translated (${r.model_used || 'LLM'})` : 'ready';
+            bar.style.width = '100%';
+
+            const card = document.createElement('div');
+            card.className = 'result-card success';
+            const langs = r.embedded_langs && r.embedded_langs.length ? ` — embedded: ${r.embedded_langs.join(', ')}` : '';
+            card.innerHTML = `
+                <div class="result-name">${r.file.name}</div>
+                <div class="result-info">${info.textContent}${langs}</div>
+                <a class="result-link" href="${r.download_url}" download="${r.filename || 'subtitles.srt'}">📥 Download Subtitles</a>
+            `;
+            resultsDiv.appendChild(card);
+        } else {
+            s.innerHTML = '✗';
+            s.className = 'status fail';
+            info.textContent = r.error || 'Failed';
+            bar.style.width = '100%';
+        }
+    }
+
+    logEl.open = true;
+    document.getElementById('grab-log-summary').textContent =
+        `Done — ${doneJobs.length} succeeded, ${failJobs.length} failed`;
+    stepsDiv.innerHTML += `<p style="margin-top: 0.75rem; color: var(--text-muted);">${doneJobs.length} succeeded, ${failJobs.length} failed</p>`;
+}
+
+// ── Helpers ──
+
+function formatSize(bytes) {
+    if (!bytes || bytes === 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let i = 0;
+    let n = bytes;
+    while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+    return n.toFixed(i > 0 ? 1 : 0) + ' ' + units[i];
+}
+function resetGrabUI() {
+    // Clear server-side history
+    fetch('/api/grab/clear', { method: 'POST' }).catch(() => {});
+    // Clear DOM
+    document.getElementById('file-list').innerHTML = '';
+    document.getElementById('grab-steps').innerHTML = '';
+    document.getElementById('grab-results').innerHTML = '';
+    document.getElementById('grab-add-another').style.display = 'none';
+    document.getElementById('grab-log').style.display = 'none';
+    document.getElementById('grab-log').open = false;
+    document.getElementById('file-confirm').style.display = 'none';
+    document.getElementById('video-file').value = '';
+}
+
+async function restoreStandalonePolling(jobId, idx, filename) {
+    const POLL_INTERVAL = 1500;
+    const interval = setInterval(async () => {
+        try {
+            const resp = await fetch('/api/grab/' + jobId);
+            if (!resp.ok) { clearInterval(interval); return; }
+            const data = await resp.json();
+            
+            const statusEl = document.getElementById('standalone-status-' + idx);
+            const infoEl = document.getElementById('standalone-info-' + idx);
+            const barEl = document.getElementById('standalone-bar-' + idx);
+            if (!statusEl) return;
+            
+            if (data.status === 'done') {
+                clearInterval(interval);
+                if (data.download_url) {
+                    statusEl.innerHTML = '✓';
+                    statusEl.className = 'status ok';
+                    infoEl.textContent = data.needs_translation ? 'auto-translated (' + (data.model_used || 'LLM') + ')' : 'ready';
+                    if (barEl) barEl.style.width = '100%';
+                    // Add download card
+                    const resultsDiv = document.getElementById('grab-results');
+                    const card = document.createElement('div');
+                    card.className = 'result-card success';
+                    card.innerHTML = '<div class="result-name">' + (data.filename || filename) + '</div>' +
+                        '<div class="result-info">ready</div>' +
+                        '<a class="result-link" href="' + data.download_url + '">📥 Download Subtitles</a>';
+                    resultsDiv.appendChild(card);
+                } else {
+                    statusEl.innerHTML = '✗';
+                    statusEl.className = 'status fail';
+                    infoEl.textContent = data.error || 'No subtitles found';
+                    if (barEl) barEl.style.width = '100%';
+                    // Add error card
+                    const resultsDiv = document.getElementById('grab-results');
+                    const card = document.createElement('div');
+                    card.className = 'result-card fail';
+                    card.innerHTML = '<div class="result-name">' + (data.filename || filename || 'Job') + '</div>' +
+                        '<div class="result-info">' + (data.error || 'No subtitles found') + '</div>';
+                    resultsDiv.appendChild(card);
+                }
+                document.getElementById('grab-add-another').style.display = 'block';
+            } else if (data.status === 'failed') {
+                statusEl.innerHTML = '✗';
+                statusEl.className = 'status fail';
+                infoEl.textContent = data.error || 'Failed';
+                if (barEl) barEl.style.width = '100%';
+                clearInterval(interval);
+            } else {
+                statusEl.innerHTML = '<span class="spinner"></span>';
+                statusEl.className = 'status processing';
+                infoEl.textContent = (data.status || '').replace(/_/g, ' ');
+                if (barEl) barEl.style.width = (data.progress_pct || 0) + '%';
+            }
+            
+            // Show new steps
+            const stepsDiv = document.getElementById('grab-steps');
+            if (data.steps && stepsDiv) {
+                for (const step of data.steps) {
+                    const color = step.startsWith('✗') ? 'var(--error)' :
+                                  step.startsWith('✓') ? 'var(--success)' : 'var(--text-muted)';
+                    const shortName = (filename || jobId).substring(0, 30);
+                    if (!stepsDiv.innerHTML.includes(step)) {
+                        stepsDiv.innerHTML += '<p style="margin:0.15rem 0;color:' + color + ';font-size:0.85rem;">[' + shortName + '] ' + step + '</p>';
+                    }
+                }
+            }
+        } catch (_) { /* keep polling */ }
+    }, POLL_INTERVAL);
+    setTimeout(function() { clearInterval(interval); }, 900000);
+}
+
+
+// ── Restore state on page load ──
+
+async function loadHistory() {
+    try {
+        const resp = await fetch('/api/grab/history');
+        if (!resp.ok) return;
+        const data = await resp.json();
+
+        // Restore batches
+        if (data.batches && data.batches.length > 0) {
+            const logEl = document.getElementById('grab-log');
+            logEl.style.display = 'block';
+            
+            for (const batch of data.batches) {
+                if (batch.status === 'complete' || batch.status === 'failed') {
+                    // Show completed batch results
+                    showBatchResults(batch);
+                } else if (batch.jobs && batch.jobs.length > 0) {
+                    // Active batch — rebuild UI and start polling
+                    restoreBatchUI(batch);
+                }
+            }
+        }
+
+        // Restore standalone jobs (both active and done)
+        if (data.standalone_jobs && data.standalone_jobs.length > 0) {
+            const resultsDiv = document.getElementById('grab-results');
+            const fileListDiv = document.getElementById('file-list');
+            const stepsDiv = document.getElementById('grab-steps');
+            const logEl = document.getElementById('grab-log');
+            
+            let activeCount = 0;
+            for (const job of data.standalone_jobs) {
+                if (job.status === 'done') {
+                    if (job.download_url) {
+                        const card = document.createElement('div');
+                        card.className = 'result-card success';
+                        const modelInfo = job.model_used ? ' (' + job.model_used + ')' : '';
+                        card.innerHTML = 
+                            '<div class="result-name">' + (job.filename || 'subtitle') + '</div>' +
+                            '<div class="result-info">ready' + modelInfo + '</div>' +
+                            '<a class="result-link" href="' + job.download_url + '">📥 Download Subtitles</a>';
+                        resultsDiv.appendChild(card);
+                    } else {
+                        const card = document.createElement('div');
+                        card.className = 'result-card fail';
+                        card.innerHTML = '<div class="result-name">' + (job.filename || job.job_id || 'Job') + '</div>' +
+                            '<div class="result-info">' + (job.error || 'No subtitles found') + '</div>';
+                        resultsDiv.appendChild(card);
+                    }
+                } else if (job.status !== 'failed') {
+                    // Active job — rebuild file list and resume polling
+                    activeCount++;
+                    const idx = activeCount - 1;
+                    fileListDiv.innerHTML += '<div class="file-item" id="standalone-item-' + idx + '">' +
+                        '<span class="status processing" id="standalone-status-' + idx + '"><span class="spinner"></span></span>' +
+                        '<span style="word-break: break-all;">' + (job.job_id || '').substring(0, 20) + '...</span>' +
+                        '<span style="color: var(--text-muted); font-size: 0.8rem; margin-left: 0.5rem;" id="standalone-info-' + idx + '">' + (job.status || '') + '</span>' +
+                        '<div style="flex:1;max-width:150px;height:4px;background:rgba(255,255,255,0.05);border-radius:2px;margin-left:0.5rem;">' +
+                            '<div id="standalone-bar-' + idx + '" style="height:100%;background:var(--accent);border-radius:2px;width:' + (job.progress_pct || 0) + '%;transition:width 0.3s;"></div>' +
+                        '</div>' +
+                    '</div>';
+                    
+                    // Resume polling
+                    restoreStandalonePolling(job.job_id, idx, job.filename || job.job_id);
+                }
+            }
+            
+            if (activeCount > 0) {
+                logEl.style.display = 'block';
+                document.getElementById('grab-log-summary').textContent = activeCount + ' active job' + (activeCount > 1 ? 's' : '') + ' restored';
+                stepsDiv.innerHTML = '<p style="color: var(--text-muted);">Restored ' + activeCount + ' job' + (activeCount > 1 ? 's' : '') + ' — polling...</p>';
+            }
+            
+            if (resultsDiv.children.length > 0 || activeCount > 0) {
+                document.getElementById('grab-add-another').style.display = 'block';
+            }
+        }
+    } catch (_) { /* history not available yet */ }
+}
+
+function showBatchResults(batch) {
+    const resultsDiv = document.getElementById('grab-results');
+    const stepsDiv = document.getElementById('grab-steps');
+    const logEl = document.getElementById('grab-log');
+    
+    logEl.style.display = 'block';
+    logEl.open = true;
+    
+    const doneJobs = (batch.jobs || []).filter(function(j) { return j.status === 'done'; });
+    const failedJobs = (batch.jobs || []).filter(function(j) { return j.status === 'failed'; });
+    
+    document.getElementById('grab-log-summary').textContent = 
+        'Batch: ' + (batch.zip_name || '') + ' — ' + doneJobs.length + ' succeeded, ' + failedJobs.length + ' failed';
+    
+    for (const j of doneJobs) {
+        if (j.download_url) {
+            const card = document.createElement('div');
+            card.className = 'result-card success';
+            const modelInfo = j.model_used ? ' (' + j.model_used + ')' : '';
+            card.innerHTML = 
+                '<div class="result-name">' + (j.filename || '') + '</div>' +
+                '<div class="result-info">ready' + modelInfo + '</div>' +
+                '<a class="result-link" href="' + j.download_url + '">📥 Download Subtitles</a>';
+            resultsDiv.appendChild(card);
+        }
+    }
+    
+    if (resultsDiv.children.length > 0) {
+        document.getElementById('grab-add-another').style.display = 'block';
+    }
+}
+
+function restoreBatchUI(batch) {
+    const fileListDiv = document.getElementById('file-list');
+    const stepsDiv = document.getElementById('grab-steps');
+    const logEl = document.getElementById('grab-log');
+    
+    logEl.style.display = 'block';
+    document.getElementById('grab-log-summary').textContent = 
+        'Batch: ' + (batch.zip_name || '') + ' — processing...';
+    
+    let fileHTML = '';
+    const jobs = batch.jobs || [];
+    for (let i = 0; i < jobs.length; i++) {
+        const j = jobs[i];
+        const status = j.status === 'done' ? '✓' : j.status === 'failed' ? '✗' : '<span class="spinner"></span>';
+        const statusClass = j.status === 'done' ? 'status ok' : j.status === 'failed' ? 'status fail' : 'status processing';
+        fileHTML += 
+            '<div class="file-item" id="batch-item-' + i + '">' +
+            '<span class="' + statusClass + '" id="batch-status-' + i + '">' + status + '</span>' +
+            '<span style="word-break: break-all;">' + (j.filename || j.job_id) + '</span>' +
+            '<span style="color: var(--text-muted); font-size: 0.8rem; margin-left: 0.5rem;" id="batch-info-' + i + '">' + (j.status || '') + '</span>' +
+            '<div style="flex:1;max-width:150px;height:4px;background:rgba(255,255,255,0.05);border-radius:2px;margin-left:0.5rem;">' +
+                '<div id="batch-bar-' + i + '" style="height:100%;background:var(--accent);border-radius:2px;width:' + (j.progress_pct || 0) + '%;transition:width 0.3s;"></div>' +
+            '</div>' +
+            '</div>';
+    }
+    fileListDiv.innerHTML = fileHTML;
+    stepsDiv.innerHTML = '<p style="color: var(--text-muted);">Restored ' + jobs.length + ' file' + (jobs.length > 1 ? 's' : '') + ' — polling...</p>';
+    
+    // Start polling
+    pollRestoredBatch(batch.batch_id);
+}
+
+async function pollRestoredBatch(batchId) {
+    const POLL_INTERVAL = 2000;
+    const interval = setInterval(async () => {
+        try {
+            const resp = await fetch('/api/grab/batch/' + batchId);
+            if (!resp.ok) { clearInterval(interval); return; }
+            const data = await resp.json();
+
+            for (let i = 0; i < (data.jobs || []).length; i++) {
+                const j = data.jobs[i];
+                const statusEl = document.getElementById('batch-status-' + i);
+                const infoEl = document.getElementById('batch-info-' + i);
+                const barEl = document.getElementById('batch-bar-' + i);
+                if (!statusEl) continue;
+
+                if (j.status === 'done') {
+                    statusEl.innerHTML = '✓';
+                    statusEl.className = 'status ok';
+                    infoEl.textContent = j.model_used ? 'auto-translated (' + j.model_used + ')' : 'ready';
+                    if (barEl) barEl.style.width = '100%';
+                } else if (j.status === 'failed') {
+                    statusEl.innerHTML = '✗';
+                    statusEl.className = 'status fail';
+                    infoEl.textContent = j.error || 'Failed';
+                    if (barEl) barEl.style.width = '100%';
+                } else {
+                    statusEl.innerHTML = '<span class="spinner"></span>';
+                    statusEl.className = 'status processing';
+                    infoEl.textContent = (j.status || '').replace(/_/g, ' ');
+                    if (barEl) barEl.style.width = (j.progress_pct || 0) + '%';
+                }
+            }
+
+            if (data.status === 'complete') {
+                clearInterval(interval);
+                const stepsDiv = document.getElementById('grab-steps');
+                const doneJobs = (data.jobs || []).filter(function(j) { return j.status === 'done'; });
+                const failedJobs = (data.jobs || []).filter(function(j) { return j.status === 'failed'; });
+                stepsDiv.innerHTML = '<p style="color: var(--success, #22c55e);">✓ Batch complete — ' + doneJobs.length + ' succeeded, ' + failedJobs.length + ' failed</p>';
+                
+                // Add download links for done jobs
+                const resultsDiv = document.getElementById('grab-results');
+                for (const j of data.jobs) {
+                    if (j.status === 'done' && j.download_url) {
+                        const card = document.createElement('div');
+                        card.className = 'result-card success';
+                        card.innerHTML = 
+                            '<div class="result-name">' + (j.filename || '') + '</div>' +
+                            '<div class="result-info">ready</div>' +
+                            '<a class="result-link" href="' + j.download_url + '">📥 Download Subtitles</a>';
+                        resultsDiv.appendChild(card);
+                    }
+                }
+                if (resultsDiv.children.length > 0) {
+                    document.getElementById('grab-add-another').style.display = 'block';
+                }
+            }
+        } catch (_) { /* keep polling */ }
+    }, POLL_INTERVAL);
+    setTimeout(function() { clearInterval(interval); }, 900000);
+}
+
+// Load history on page load
+document.addEventListener('DOMContentLoaded', function() {
+    loadHistory();
+});
+
+
+// ── Video + Subtitle Sync ─────────────────────────────
+
+const syncDropZone = document.getElementById('sync-drop-zone');
+syncDropZone.addEventListener('dragover', e => { e.preventDefault(); syncDropZone.classList.add('dragover'); });
+syncDropZone.addEventListener('dragleave', () => syncDropZone.classList.remove('dragover'));
+syncDropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    syncDropZone.classList.remove('dragover');
+    const files = e.dataTransfer.files;
+    if (files.length) handleSyncFiles(files);
+});
+
+function handleSyncFiles(fileList) {
+    if (!fileList || fileList.length < 2) {
+        document.getElementById('sync-status').innerHTML = '<span style="color: var(--error);">Drop both a video AND subtitle file</span>';
+        return;
+    }
+    const files = Array.from(fileList);
+    const video = files.find(f => f.name.match(/\.(mkv|mp4|avi|mov|webm)$/i));
+    const sub = files.find(f => f.name.match(/\.(srt|ass|ssa|vtt)$/i));
+    if (!video) {
+        document.getElementById('sync-status').innerHTML = '<span style="color: var(--error);">No video file found (need .mkv, .mp4, etc.)</span>';
+        return;
+    }
+    if (!sub) {
+        document.getElementById('sync-status').innerHTML = '<span style="color: var(--error);">No subtitle file found (need .srt, .ass, etc.)</span>';
+        return;
+    }
+    syncVideoAndSub(video, sub);
+}
+
+async function syncVideoAndSub(videoFile, subFile) {
+    const statusEl = document.getElementById('sync-status');
+    const resultEl = document.getElementById('sync-result');
+    const manualOffset = parseFloat(document.getElementById('sync-manual-offset').value) || 0;
+    statusEl.innerHTML = '<span class="spinner"></span> Syncing...';
+    resultEl.innerHTML = '';
+
+    const form = new FormData();
+    form.append('video_file', videoFile);
+    form.append('sub_file', subFile);
+    form.append('mode', 'upload');
+    form.append('offset', manualOffset);
+
+    try {
+        const resp = await fetch('/api/sync/apply', { method: 'POST', body: form });
+        if (resp.ok) {
+            const blob = await resp.blob();
+            const url = URL.createObjectURL(blob);
+            const outName = subFile.name.replace(/\.(srt|ass|ssa|vtt)$/i, '.synced.$1');
+            const offsetSec = resp.headers.get('X-Sync-Offset') || manualOffset;
+            const offsetMs = Math.abs(parseFloat(offsetSec) * 1000).toFixed(0);
+            resultEl.innerHTML = '<div class="result-card success" style="margin-top: 0.5rem;">' +
+                '<div class="result-name">' + subFile.name + ' synced with ' + videoFile.name + '</div>' +
+                '<div class="result-info">Offset: ' + offsetSec + 's (' + offsetMs + 'ms)' +
+                (manualOffset && parseFloat(offsetSec) === 0 ? ' — auto-detect failed, used manual offset' : '') + '</div>' +
+                '<a class="result-link" href="' + url + '" download="' + outName + '">📥 Download Synced Subtitles</a>' +
+                '</div>';
+            statusEl.innerHTML = '<span style="color: var(--success);">✓ Sync complete — corrected by ' + offsetSec + 's</span>';
+        } else {
+            let err = 'Sync failed';
+            try { err = (await resp.json()).error || err; } catch(_) {}
+            statusEl.innerHTML = '<span style="color: var(--error);">✗ ' + err + '</span>';
+        }
+    } catch (e) {
+        statusEl.innerHTML = '<span style="color: var(--error);">✗ Network error: ' + e.message + '</span>';
+    }
+}
+
+
+// Show "Add Another" when results appear
+new MutationObserver(() => {
+    const resultsDiv = document.getElementById('grab-results');
+    if (resultsDiv && resultsDiv.children.length > 0) {
+        document.getElementById('grab-add-another').style.display = 'block';
+    }
+}).observe(document.getElementById('grab-results'), { childList: true });
+
+</script>
+{% endblock %}
+{% block scripts %}
+
+
+
+{% endblock %}

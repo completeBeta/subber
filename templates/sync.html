@@ -1,0 +1,317 @@
+{% extends "base.html" %}
+{% block title %}Sync — Subber{% endblock %}
+{% block tab_sync_class %}active{% endblock %}
+{% block content %}
+<section class="sync-card">
+    <h2>Sync Subtitle to Video</h2>
+    <p class="sub" style="color: var(--text-muted); margin-bottom: 1.5rem;">
+        Fix subtitle timing by aligning it to the video's audio track.
+    </p>
+
+    <!-- Mode toggle -->
+    <div class="mode-toggle">
+        <button class="mode-btn active" id="mode-single" onclick="switchSyncMode('single')">📁 Single</button>
+        <button class="mode-btn" id="mode-batch" onclick="switchSyncMode('batch')">📦 Batch</button>
+    </div>
+
+    <!-- Single mode (path + upload) -->
+    <div id="mode-single-fields">
+        <div class="mode-toggle" style="margin-bottom: 1rem; border: none;">
+            <button class="mode-btn active" id="single-path" onclick="switchSingleMode('path')">Path</button>
+            <button class="mode-btn" id="single-upload" onclick="switchSingleMode('upload')">Upload</button>
+        </div>
+
+        <!-- Path mode -->
+        <div id="single-path-fields">
+            <div class="form-group">
+                <label>Video file path</label>
+                <input type="text" id="sync-video-path" placeholder="/media/anime/Show.S01E01.mkv">
+            </div>
+            <div class="form-group">
+                <label>Subtitle file path</label>
+                <input type="text" id="sync-sub-path" placeholder="/media/anime/Show.S01E01.ja.srt">
+            </div>
+        </div>
+
+        <!-- Upload mode -->
+        <div id="single-upload-fields" style="display:none">
+            <div class="form-group">
+                <label>Video file (will be deleted after sync)</label>
+                <div class="drop-zone" id="sync-video-drop">
+                    <div class="drop-content">
+                        <span class="drop-icon">🎬</span>
+                        <p id="sync-video-label">Drop video file or click</p>
+                    </div>
+                    <input type="file" id="sync-video-file" accept="video/*" hidden>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Subtitle file</label>
+                <div class="drop-zone" id="sync-sub-drop">
+                    <div class="drop-content">
+                        <span class="drop-icon">📝</span>
+                        <p id="sync-sub-label">Drop .srt/.ass/.vtt file or click</p>
+                    </div>
+                    <input type="file" id="sync-sub-file" accept=".srt,.ass,.ssa,.vtt" hidden>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Batch mode -->
+    <div id="mode-batch-fields" style="display:none">
+        <div class="form-group">
+            <label>Zip file containing video + subtitle pairs</label>
+            <div class="drop-zone" id="batch-zip-drop">
+                <div class="drop-content">
+                    <span class="drop-icon">📦</span>
+                    <p id="batch-zip-label">Drop a .zip file or click</p>
+                    <p class="sub">Files are auto-paired by filename. E.g. Show.S01E01.mkv + Show.S01E01.ja.srt</p>
+                </div>
+                <input type="file" id="batch-zip-file" accept=".zip" hidden>
+            </div>
+        </div>
+    </div>
+
+    <button class="btn-save" id="sync-preview-btn" onclick="runSyncPreview()">Preview Sync</button>
+    <button class="btn-save" id="batch-sync-btn" onclick="runBatchSync()" style="display:none">Sync All & Download Zip</button>
+    <div id="sync-status" style="margin-top: 1rem; font-size: 0.85rem;"></div>
+
+    <div class="sync-preview" id="sync-preview" style="display: none;">
+        <h3>Sync Preview — offset: <span id="sync-offset">0.0</span>s</h3>
+        <p class="sub" style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 0.5rem;">
+            <span class="synced-time">Green</span> = synced · <span class="original-time">Red</span> = original
+        </p>
+        <table>
+            <thead><tr><th>#</th><th>Original</th><th>Synced</th><th>Text</th></tr></thead>
+            <tbody id="sync-preview-body"></tbody>
+        </table>
+        <div style="margin-top: 1rem;">
+            <button class="btn-save" onclick="applySync()">Apply Sync & Download</button>
+            <span class="save-feedback" id="sync-feedback"></span>
+        </div>
+    </div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+let syncMode = 'single';   // 'single' or 'batch'
+let singleMode = 'path';   // 'path' or 'upload'
+let syncVideoFile = null;
+let syncSubFile = null;
+let batchZipFile = null;
+let lastPreviewOffset = 0.0;
+
+function switchSyncMode(mode) {
+    syncMode = mode;
+    document.getElementById('mode-single').className = 'mode-btn' + (mode === 'single' ? ' active' : '');
+    document.getElementById('mode-batch').className = 'mode-btn' + (mode === 'batch' ? ' active' : '');
+    document.getElementById('mode-single-fields').style.display = mode === 'single' ? '' : 'none';
+    document.getElementById('mode-batch-fields').style.display = mode === 'batch' ? '' : 'none';
+    document.getElementById('sync-preview-btn').style.display = mode === 'single' ? '' : 'none';
+    document.getElementById('batch-sync-btn').style.display = mode === 'batch' ? '' : 'none';
+    document.getElementById('sync-preview').style.display = 'none';
+    document.getElementById('sync-status').innerHTML = '';
+}
+
+function switchSingleMode(mode) {
+    singleMode = mode;
+    document.getElementById('single-path').className = 'mode-btn' + (mode === 'path' ? ' active' : '');
+    document.getElementById('single-upload').className = 'mode-btn' + (mode === 'upload' ? ' active' : '');
+    document.getElementById('single-path-fields').style.display = mode === 'path' ? '' : 'none';
+    document.getElementById('single-upload-fields').style.display = mode === 'upload' ? '' : 'none';
+}
+
+// Single upload drop zones
+['video', 'sub'].forEach(type => {
+    const drop = document.getElementById('sync-' + type + '-drop');
+    const input = document.getElementById('sync-' + type + '-file');
+    const label = document.getElementById('sync-' + type + '-label');
+    if (!drop || !input) return;
+    drop.addEventListener('click', () => input.click());
+    drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('drag-over'); });
+    drop.addEventListener('dragleave', () => drop.classList.remove('drag-over'));
+    drop.addEventListener('drop', (e) => {
+        e.preventDefault();
+        drop.classList.remove('drag-over');
+        const file = e.dataTransfer.files[0];
+        if (file) {
+            if (type === 'video') syncVideoFile = file;
+            else syncSubFile = file;
+            label.textContent = file.name;
+            label.style.color = 'var(--success)';
+        }
+    });
+    input.addEventListener('change', () => {
+        if (input.files[0]) {
+            if (type === 'video') syncVideoFile = input.files[0];
+            else syncSubFile = input.files[0];
+            label.textContent = input.files[0].name;
+            label.style.color = 'var(--success)';
+        }
+    });
+});
+
+// Batch zip drop zone
+const batchDrop = document.getElementById('batch-zip-drop');
+const batchInput = document.getElementById('batch-zip-file');
+const batchLabel = document.getElementById('batch-zip-label');
+if (batchDrop && batchInput) {
+    batchDrop.addEventListener('click', () => batchInput.click());
+    batchDrop.addEventListener('dragover', (e) => { e.preventDefault(); batchDrop.classList.add('drag-over'); });
+    batchDrop.addEventListener('dragleave', () => batchDrop.classList.remove('drag-over'));
+    batchDrop.addEventListener('drop', (e) => {
+        e.preventDefault();
+        batchDrop.classList.remove('drag-over');
+        if (e.dataTransfer.files[0]) {
+            batchZipFile = e.dataTransfer.files[0];
+            batchLabel.textContent = batchZipFile.name;
+            batchLabel.style.color = 'var(--success)';
+        }
+    });
+    batchInput.addEventListener('change', () => {
+        if (batchInput.files[0]) {
+            batchZipFile = batchInput.files[0];
+            batchLabel.textContent = batchZipFile.name;
+            batchLabel.style.color = 'var(--success)';
+        }
+    });
+}
+
+async function runBatchSync() {
+    if (!batchZipFile) {
+        document.getElementById('sync-status').innerHTML = '<span style="color: var(--error)">Select a zip file first.</span>';
+        return;
+    }
+
+    const status = document.getElementById('sync-status');
+    const btn = document.getElementById('batch-sync-btn');
+    status.innerHTML = '<span class="spinner" style="display:inline-block;width:14px;height:14px;border:2px solid var(--muted);border-top-color:var(--accent);border-radius:50%;animation:spin 0.6s linear infinite;vertical-align:middle;margin-right:0.5rem;"></span> Syncing all pairs...';
+    btn.disabled = true;
+
+    const form = new FormData();
+    form.append('file', batchZipFile);
+
+    try {
+        const resp = await fetch('/api/sync/batch', { method: 'POST', body: form });
+        if (!resp.ok) {
+            const err = await resp.json();
+            throw new Error(err.error || 'Batch sync failed');
+        }
+        const synced = resp.headers.get('X-Synced-Count') || '?';
+        const failed = resp.headers.get('X-Failed-Count') || '0';
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const filename = batchZipFile.name.replace(/\.zip$/i, '.synced.zip');
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+        status.innerHTML = '<span style="color: var(--success)">✓ ' + synced + ' synced' + (failed > 0 ? ', ' + failed + ' failed' : '') + '</span>';
+    } catch (e) {
+        status.innerHTML = '<span style="color: var(--error)">✗ ' + e.message + '</span>';
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function runSyncPreview() {
+    const status = document.getElementById('sync-status');
+    document.getElementById('sync-preview').style.display = 'none';
+    status.innerHTML = '';
+
+    let form;
+    if (singleMode === 'path') {
+        const video = document.getElementById('sync-video-path').value.trim();
+        const sub = document.getElementById('sync-sub-path').value.trim();
+        if (!video || !sub) {
+            status.innerHTML = '<span style="color: var(--error)">Both paths are required.</span>';
+            return;
+        }
+        form = new FormData();
+        form.append('video_path', video);
+        form.append('sub_path', sub);
+    } else {
+        if (!syncVideoFile || !syncSubFile) {
+            status.innerHTML = '<span style="color: var(--error)">Both video and subtitle files are required.</span>';
+            return;
+        }
+        form = new FormData();
+        form.append('video_file', syncVideoFile);
+        form.append('sub_file', syncSubFile);
+        form.append('mode', 'upload');
+    }
+
+    status.innerHTML = 'Analyzing audio...';
+    document.getElementById('sync-preview-btn').disabled = true;
+
+    try {
+        const resp = await fetch('/api/sync/preview', { method: 'POST', body: form });
+        const data = await resp.json();
+        if (data.error) throw new Error(data.error);
+
+        status.innerHTML = '';
+        lastPreviewOffset = data.offset_seconds;
+        document.getElementById('sync-offset').textContent = data.offset_seconds.toFixed(3);
+        document.getElementById('sync-offset').style.color = data.offset_seconds !== 0 ? 'var(--accent)' : 'var(--text-muted)';
+
+        const tbody = document.getElementById('sync-preview-body');
+        tbody.innerHTML = data.sample_lines.map(l => `
+            <tr>
+                <td>${l.index}</td>
+                <td class="original-time">${l.original_start.toFixed(3)}s</td>
+                <td class="synced-time">${l.synced_start.toFixed(3)}s</td>
+                <td class="sub-text">${l.text}</td>
+            </tr>
+        `).join('');
+        document.getElementById('sync-preview').style.display = 'block';
+    } catch (e) {
+        status.innerHTML = '<span style="color: var(--error)">✗ ' + e.message + '</span>';
+    } finally {
+        document.getElementById('sync-preview-btn').disabled = false;
+    }
+}
+
+async function applySync() {
+    const fb = document.getElementById('sync-feedback');
+    fb.className = 'save-feedback';
+
+    let form;
+    if (singleMode === 'path') {
+        const video = document.getElementById('sync-video-path').value.trim();
+        const sub = document.getElementById('sync-sub-path').value.trim();
+        form = new FormData();
+        form.append('video_path', video);
+        form.append('sub_path', sub);
+    } else {
+        form = new FormData();
+        form.append('video_file', syncVideoFile);
+        form.append('sub_file', syncSubFile);
+        form.append('mode', 'upload');
+    }
+
+    try {
+        const resp = await fetch('/api/sync/apply', { method: 'POST', body: form });
+        if (!resp.ok) {
+            const err = await resp.json();
+            throw new Error(err.error || 'Sync failed');
+        }
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const filename = resp.headers.get('Content-Disposition')?.match(/filename="(.+)"/)?.[1] || 'synced.srt';
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+        fb.textContent = '✓ Synced subtitle downloaded';
+        fb.className = 'save-feedback show success';
+    } catch (e) {
+        fb.textContent = '✗ ' + e.message;
+        fb.className = 'save-feedback show error';
+    }
+    setTimeout(() => fb.className = 'save-feedback', 3000);
+}
+</script>
+{% endblock %}

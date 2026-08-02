@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Subber{% endblock %}</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%230f1117' stroke='%236c8cff' stroke-width='4'/><text x='50' y='68' text-anchor='middle' font-size='42' fill='%236c8cff' font-family='sans-serif' font-weight='bold'>Sub</text></svg>">
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/library.css">
+</head>
+<body>
+    <header>
+        <h1>Subber</h1>
+        <span class="tagline">Subtitle Translator</span>
+    </header>
+
+    <nav class="tab-bar">
+        <a href="/grab" class="tab {% block tab_grab_class %}{% endblock %}">Grab</a>
+        <a href="/" class="tab {% block tab_translate_class %}{% endblock %}">Translate</a>
+        <a href="/library" class="tab {% block tab_library_class %}{% endblock %}">Library</a>
+        <a href="/search" class="tab {% block tab_search_class %}{% endblock %}">Search</a>
+        <a href="/logs" class="tab {% block tab_logs_class %}{% endblock %}">Logs</a>
+        <a href="/settings" class="tab {% block tab_settings_class %}{% endblock %}">Settings</a>
+    </nav>
+
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer>
+        <p>Files are automatically removed after 24 hours.</p>
+    </footer>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>

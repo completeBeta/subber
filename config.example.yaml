@@ -1,0 +1,103 @@
+# Subber Configuration
+# Copy to config/config.yaml (Docker) or ~/.config/subber/config.yaml (standalone)
+# All settings can also be configured via the Web UI at /settings
+
+# --- Translation ---
+translation:
+  source_lang: auto
+  target_lang: en
+  temperature: 0.1
+  max_tokens: 4096
+  chunk_size: 50
+  max_retries: 1
+  timeout: 120
+  backends:
+    - name: DeepSeek V4 Flash
+      api_base: https://api.deepseek.com/v1
+      api_key: ""                    # Your DeepSeek API key
+      model: deepseek-v4-flash
+      priority: 0
+
+# --- Subtitle Sync ---
+sync:
+  engine: ffsubsync
+  auto_sync: false
+  default_offset: 0
+  ffmpeg_path: ffmpeg
+
+# --- Subtitle Providers ---
+providers:
+  enabled:
+    - embedded
+    - subdl
+    - addic7ed
+    - subscene
+    - opensubtitles             # Fallback — only searched if nothing else found
+  subdl:
+    api_key: ""                  # Free key from subdl.com (~2,000/day)
+    pro_mode: false              # Set true for 30,000/day PRO plan
+  addic7ed:
+    cookies: ""                  # Browser cookies for addic7ed.com
+  opensubtitles:
+    api_key: ""                  # .com API consumer key (opensubtitles.com/consumers)
+    username: ""                 # .org VIP username (1,000/day with VIP)
+    password: ""                 # .org VIP password
+    tier: free                   # free (5/day) | vip (.org auth 1,000/day) | premium (.com 5,000/day)
+    daily_limit: 0               # Override daily limit (0 = use tier default)
+  subscene: true
+  podnapisi: true                # Disabled by default (DNS issues)
+  embedded: true
+
+# --- Subtitle Selection ---
+selection:
+  language_priority: [en, ja, ko, zh, fr, de, es, it, pt, ru, ar]
+  acceptable_track_types: [dialogue, sdh]
+  track_type_priority: [dialogue, sdh, forced, commentary, signs]
+
+# --- Library ---
+library:
+  paths: []                      # Add your media directories here
+  drift_threshold_ms: 200
+  max_concurrent: 4
+  scan_interval_hours: 0         # 0 = manual only, 6 = every 6 hours
+  dry_run_default: false         # Start with real scans (not preview)
+  use_identification: true       # AniList + TMDB show identification
+  identify_prefer: anilist       # anilist | tmdb
+  tmdb_api_key: ""               # Optional, free from themoviedb.org
+  providers:
+    enabled:
+      - embedded
+      - subdl
+      - addic7ed
+      - subscene
+      - opensubtitles
+
+# --- UI ---
+ui:
+  theme: dark
+  api_key: ""                    # Optional: protects write operations (scan, translate, grab)
+
+# --- Cost Estimation ---
+# Controls translation cost tracking and estimates shown in Library scans.
+# Per-model overrides: add a "models" map keyed by model name for provider-specific pricing.
+cost:
+  input_cost_per_million: 0.14   # DeepSeek = 0.14, OpenAI = 2.50
+  output_cost_per_million: 0.28  # DeepSeek = 0.28, OpenAI = 10.00
+  chars_per_token: 2.5           # 2.5 for CJK, 4.0 for English
+  peak_enabled: false            # Enable peak pricing multiplier
+  peak_multiplier: 2.0           # DeepSeek charges 2x during peak hours
+  peak_hours_utc:                # Peak hour ranges in UTC
+    - [1, 4]
+    - [6, 10]
+  timezone: UTC                  # Your timezone for peak hour calculation
+  # Per-model overrides (optional):
+  # models:
+  #   deepseek-chat:
+  #     input_cost_per_million: 0.14
+  #     output_cost_per_million: 0.28
+
+# --- Limits ---
+limits:
+  max_upload_mb: 2048
+  min_free_disk_mb: 1024
+  max_sync_concurrent: 1
