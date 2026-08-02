@@ -93,9 +93,17 @@ def classify_media(file_path: Path, library_root: Path) -> tuple[str, dict]:
         if season_match:
             season = int(season_match.group(1))
             # Try to find episode number in filename
-            ep_match = re.search(r"[Ee](\d{1,3})", filename, re.IGNORECASE)
+            # Strip CRC/hash patterns first (e.g. [3E5BF53D]) — they can contain
+            # "E<digits>" that get mistaken for episode markers
+            clean_name = re.sub(r'\[[0-9A-Fa-f]{8}\]', '', filename)
+            clean_name = re.sub(r'\([0-9A-Fa-f]{8}\)', '', clean_name)
+            ep_match = re.search(r"[Ee](\d{1,3})", clean_name, re.IGNORECASE)
             if not ep_match:
-                ep_match = re.search(r"(\d{1,3})", filename)
+                ep_match = re.search(r"-\s*(\d{1,3})\b", clean_name)  # " - 02" format
+            if not ep_match:
+                # Last resort: last number in filename (avoids group tags like [Moozzi2])
+                nums = re.findall(r"\b(\d{1,3})\b", clean_name)
+                ep_match = re.match(r"(\d+)", str(nums[-1])) if nums else None
             episode = int(ep_match.group(1)) if ep_match else None
             # Show title is the parent folder before "Season XX"
             show_idx = parts.index(part)
