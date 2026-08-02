@@ -67,7 +67,7 @@ class OpenSubtitlesProvider(SubtitleProvider):
         self._token: str | None = None
         self._client = httpx.AsyncClient(
             base_url=API_BASE,
-            headers={"User-Agent": USER_AGENT, "Api-Key": self.api_key},
+            headers={"User-Agent": USER_AGENT, "Api-Key": self.api_key, "Accept": "application/json"},
             timeout=30, follow_redirects=True,
         )
 
