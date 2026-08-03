@@ -837,22 +837,22 @@ async def _search_download_and_process(
     if not results:
         return {"success": False, "error": "No subtitles found from any provider"}
 
-    # Download best match to temp (avoids overwrite conflicts when
-    # multiple episodes share the same provider result)
+    # Download best match to temp dir (avoids overwrite conflicts when
+    # multiple episodes share the same provider result filename)
     best = results[0]
     try:
-        tmp_dir = video_path.parent
-        import uuid
-        tmp_name = f".subber_{uuid.uuid4().hex[:8]}_{best.filename}"
-        tmp_dest = tmp_dir / tmp_name
+        import uuid, tempfile
+        tmp_dir = Path(tempfile.mkdtemp(prefix="subber_dl_"))
         downloaded_path = await asyncio.wait_for(
             registry.download(best, tmp_dir),
             timeout=30,
         )
-        # Rename to unique name to avoid collisions
-        if downloaded_path != tmp_dest:
-            shutil.move(str(downloaded_path), str(tmp_dest))
-            downloaded_path = tmp_dest
+        # Move to target dir with unique name
+        tmp_name = f".subber_{uuid.uuid4().hex[:8]}_{best.filename}"
+        tmp_dest = video_path.parent / tmp_name
+        shutil.move(str(downloaded_path), str(tmp_dest))
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        downloaded_path = tmp_dest
     except asyncio.TimeoutError:
         return {"success": False, "error": "Download timed out"}
     except Exception as e:
