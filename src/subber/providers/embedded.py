@@ -94,12 +94,11 @@ class EmbeddedProvider(SubtitleProvider):
             "-map", f"0:s:{track_index}",
         ]
 
-        if codec in ("subrip", "ass", "ssa", "webvtt"):
-            args.extend(["-c:s", "copy"])
-        else:
-            args.extend(["-c:s", "copy"])
-            ext = CODEC_EXTS.get(codec, "sup")
-            output_path = output_path.with_suffix(f".{ext}")
+        # Always copy codec, but match output extension to codec
+        # (ASS data in .srt container = ffmpeg error)
+        args.extend(["-c:s", "copy"])
+        ext = CODEC_EXTS.get(codec, "srt")
+        output_path = output_path.with_suffix(f".{ext}")
 
         args.append(str(output_path))
 
