@@ -246,6 +246,9 @@ async def _process_file(record: dict, scan_id: int, drift_threshold_ms: int) -> 
     actual_file = library_db.get_file_by_path(record["file_path"])
     if actual_file:
         file_id = actual_file["id"]
+        # Skip already-completed files (safe to restart full scans)
+        if actual_file.get("status") == "done":
+            return {"success": True, "action": "skipped", "cost": 0}
 
     # Mark as in progress
     library_db.update_file_status(file_id, status="in_progress")
