@@ -226,12 +226,16 @@ def _mask(value: str) -> str:
 async def api_get_config():
     """Return the full current config with masked secrets.
 
+    Reloads from disk first — multi-worker uvicorn keeps per-process config
+    caches, so without this a GET on worker B shows stale values after a
+    POST on worker A updated them.
+
     Uses a deep copy so masking NEVER mutates the live config cache.
     Masked values are safe for the settings UI to display; the POST handler
     refuses to persist any value containing '****' (see _restore_masked).
     """
+    config.reload()
     display = deepcopy(config.get())
-
     # Translation: top-level key + every backend's key
     tr = display.get("translation")
     if isinstance(tr, dict):

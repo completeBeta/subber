@@ -60,8 +60,12 @@ class OpenSubtitlesProvider(SubtitleProvider):
             self._daily_limit = daily_limit
         elif tier == "vip":
             self._daily_limit = 1000  # .org VIP auth = 1,000/day
+        elif tier == "lite":
+            self._daily_limit = 2000  # .com Lite plan = 2,000/day
         elif tier == "premium":
             self._daily_limit = 5000  # .com paid packages
+        elif tier == "custom":
+            self._daily_limit = daily_limit if daily_limit > 0 else 2000  # custom fallback
         else:
             self._daily_limit = 5     # free tier
         self._token: str | None = None

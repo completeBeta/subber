@@ -222,7 +222,9 @@
                 <select id="opensubtitles-tier" name="providers.opensubtitles.tier">
                     <option value="free">Free (5 downloads/day)</option>
                     <option value="vip">VIP — .org auth (1,000/day)</option>
+                    <option value="lite">Lite — .com API (2,000/day)</option>
                     <option value="premium">Premium — .com API (5,000/day)</option>
+                    <option value="custom">Custom — set your own daily limit</option>
                 </select>
             </div>
             <div class="form-group">
@@ -393,10 +395,13 @@ async function loadSettings() {
         document.getElementById('subdl-pro-mode').checked = (cfg.providers?.subdl?.pro_mode) || false;
         // OpenSubtitles settings
         const osCfg = prov.opensubtitles || {};
-        document.getElementById('opensubtitles-tier').value = osCfg.tier || 'free';
+        // If a custom daily limit is set, show the "custom" tier option
+        const osTier = osCfg.tier || 'free';
+        document.getElementById('opensubtitles-tier').value = osTier;
         document.getElementById('opensubtitles-api-key').value = osCfg.api_key || '';
         document.getElementById('opensubtitles-username').value = osCfg.username || '';
         document.getElementById('opensubtitles-password').value = osCfg.password || '';
+        document.getElementById('opensubtitles-daily-limit').value = osCfg.daily_limit || 0;
         loadOpenSubtitlesUsage();
         document.getElementById('addic7ed-cookies').value = prov.addic7ed?.cookies || '';
         // Library settings
@@ -523,6 +528,7 @@ async function saveSettings() {
                     api_key: document.getElementById('opensubtitles-api-key').value,
                     username: document.getElementById('opensubtitles-username').value,
                     password: document.getElementById('opensubtitles-password').value,
+                    daily_limit: numOr('opensubtitles-daily-limit', 0),
                 },
                 
             }

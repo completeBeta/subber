@@ -212,7 +212,12 @@ def library_settings() -> dict:
     return get_section("library")
 
 def build_provider_registry() -> "ProviderRegistry":
-    """Build a ProviderRegistry from current config settings."""
+    """Build a ProviderRegistry from current config settings.
+
+    Reloads config from disk first — multi-worker uvicorn keeps per-process
+    caches, so provider config changes must be re-read before building.
+    """
+    reload()
     import os
     from .providers import ProviderRegistry
     from .providers.embedded import EmbeddedProvider
