@@ -117,6 +117,23 @@ class OpenSubtitlesProvider(SubtitleProvider):
         usage[today] = usage.get(today, 0) + 1
         self._save_usage(usage)
 
+    def _sync_usage_from_api(self, body: dict):
+        """Sync local usage counter from the API's authoritative quota data.
+
+        OpenSubtitles returns {requests, remaining, reset_time} on quota errors.
+        The local counter can drift (e.g. stale daily_limit config), so when the
+        API tells us the real numbers, adopt them.
+        """
+        try:
+            used = body.get("requests")
+            if used is not None:
+                today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                usage = self._load_usage()
+                usage[today] = int(used)
+                self._save_usage(usage)
+        except (TypeError, ValueError):
+            pass
+
     def get_usage(self) -> dict:
         """Return current usage stats for the UI."""
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -232,6 +249,9 @@ class OpenSubtitlesProvider(SubtitleProvider):
                 detail = body.get("message", "")
                 if not detail:
                     detail = json.dumps(body)
+                # Sync local usage counter from the API's authoritative quota data
+                # (body has "requests" = used, "remaining" = left, "reset_time")
+                self._sync_usage_from_api(body)
             except Exception:
                 detail = resp.text[:300]
             raise httpx.HTTPStatusError(
