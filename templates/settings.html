@@ -568,16 +568,29 @@ async function saveSettings() {
     ];
 
     try {
+        const failed = [];
         for (const s of sections) {
-            const resp = await fetch('/api/config', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json', 'X-API-Key': API_KEY},
-                body: JSON.stringify(s),
-            });
-            if (!resp.ok) throw new Error(await resp.text());
+            try {
+                const resp = await fetch('/api/config', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json', 'X-API-Key': API_KEY},
+                    body: JSON.stringify(s),
+                });
+                if (!resp.ok) {
+                    const errText = await resp.text();
+                    failed.push(s.section + ': ' + errText);
+                }
+            } catch (e) {
+                failed.push(s.section + ': ' + e.message);
+            }
         }
-        fb.textContent = '✓ Settings saved';
-        fb.className = 'save-feedback show success';
+        if (failed.length === 0) {
+            fb.textContent = '✓ Settings saved';
+            fb.className = 'save-feedback show success';
+        } else {
+            fb.textContent = '⚠ Partially saved — ' + failed.length + ' section(s) failed: ' + failed.join('; ');
+            fb.className = 'save-feedback show error';
+        }
     } catch (e) {
         fb.textContent = '✗ Save failed: ' + e.message;
         fb.className = 'save-feedback show error';

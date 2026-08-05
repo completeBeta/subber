@@ -240,6 +240,12 @@ async def _process_file(record: dict, scan_id: int, drift_threshold_ms: int) -> 
     if _is_cancelled(scan_id):
         return {"success": False, "action": "cancelled", "cost": 0, "error": "Scan cancelled"}
 
+    # Wait if scan is paused (polls every 2s until unpaused or cancelled)
+    while _is_paused(scan_id):
+        await asyncio.sleep(2)
+        if _is_cancelled(scan_id):
+            return {"success": False, "action": "cancelled", "cost": 0, "error": "Scan cancelled"}
+
     file_path = Path(record["file_path"])
     file_id = library_db.upsert_file(record)
     # upsert_file returns lastrowid which is 0 for UPDATEs, so fetch the real ID
@@ -249,6 +255,12 @@ async def _process_file(record: dict, scan_id: int, drift_threshold_ms: int) -> 
         # Skip already-completed files (safe to restart full scans)
         if actual_file.get("status") == "done":
             return {"success": True, "action": "skipped", "cost": 0}
+
+    # Check for existing subtitle output (from a prior scan that was interrupted)
+    # Avoids re-extraction/download when the work was already done
+    existing_subs = list(file_path.parent.glob(file_path.stem + ".en.*"))
+    if existing_subs:
+        return {"success": True, "action": "skipped", "cost": 0}
 
     # Mark as in progress
     library_db.update_file_status(file_id, status="in_progress")
@@ -478,6 +490,45 @@ def _is_cancelled(scan_id: int) -> bool:
         return scan is not None and scan.get('status') == 'cancelled'
     except Exception:
         return False
+
+
+# ── Scan pause / resume ──
+
+_paused_scans: set[int] = set()
+
+def pause_scan(scan_id: int) -> bool:
+    """Pause a running scan. Returns True if the scan was paused."""
+    try:
+        scan = library_db.get_scan(scan_id)
+        if scan and scan.get("status") == "running":
+            library_db.update_scan(scan_id, status="paused")
+            _paused_scans.add(scan_id)
+            print(f"[LIBRARY] Scan {scan_id} paused", flush=True)
+            return True
+    except Exception:
+        pass
+    return False
+
+def resume_scan(scan_id: int) -> bool:
+    """Resume a paused scan. Returns True if the scan was resumed."""
+    try:
+        scan = library_db.get_scan(scan_id)
+        if scan and scan.get("status") == "paused":
+            library_db.update_scan(scan_id, status="running")
+            _paused_scans.discard(scan_id)
+            print(f"[LIBRARY] Scan {scan_id} resumed", flush=True)
+            return True
+    except Exception:
+        pass
+    return False
+
+def _is_paused(scan_id: int) -> bool:
+    """Check if a scan is paused (DB-backed, survives worker restarts)."""
+    try:
+        scan = library_db.get_scan(scan_id)
+        return scan is not None and scan.get('status') == 'paused'
+    except Exception:
+        return scan_id in _paused_scans
 
 
 def _planned_action(status: str) -> str:

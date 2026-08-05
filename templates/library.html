@@ -91,7 +91,11 @@
             <div class="scan-progress-fill" id="scan-progress-fill" style="width: 0%"></div>
         </div>
         <p id="scan-progress-text" style="color: var(--text-muted); margin-top: 0.5rem;">Scanning...</p>
-        <button id="cancel-scan-btn" onclick="cancelScan()" style="display: none; background: var(--error); color: #fff; border: none; padding: 0.4rem 1rem; border-radius: 6px; cursor: pointer; margin-top: 0.5rem;">Cancel Scan</button>
+        <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
+            <button id="pause-scan-btn" onclick="pauseScan()" style="display: none; background: var(--accent); color: #fff; border: none; padding: 0.4rem 1rem; border-radius: 6px; cursor: pointer;">⏸ Pause</button>
+            <button id="resume-scan-btn" onclick="resumeScan()" style="display: none; background: #2ecc71; color: #fff; border: none; padding: 0.4rem 1rem; border-radius: 6px; cursor: pointer;">▶ Resume</button>
+            <button id="cancel-scan-btn" onclick="cancelScan()" style="display: none; background: var(--error); color: #fff; border: none; padding: 0.4rem 1rem; border-radius: 6px; cursor: pointer;">Cancel Scan</button>
+        </div>
     </div>
 
     <!-- Stats panel -->
@@ -280,9 +284,15 @@ async function checkActiveScan() {
         if (data.active_scan_id) {
             activeScanId = data.active_scan_id;
             document.getElementById('scan-progress').style.display = 'block';
-            document.getElementById('cancel-scan-btn').style.display = 'inline-block';
             document.getElementById('scan-full-btn').disabled = true;
             document.getElementById('scan-incremental-btn').disabled = true;
+            // Show pause if running, resume if paused
+            if (data.active_scan_status === 'paused') {
+                document.getElementById('resume-scan-btn').style.display = 'inline-block';
+            } else {
+                document.getElementById('pause-scan-btn').style.display = 'inline-block';
+            }
+            document.getElementById('cancel-scan-btn').style.display = 'inline-block';
             pollScan();
         }
     } catch (e) {}
@@ -519,6 +529,7 @@ async function startScan(type) {
 
         activeScanId = data.scan_id;
         document.getElementById('scan-progress').style.display = 'block';
+        document.getElementById('pause-scan-btn').style.display = 'inline-block';
         document.getElementById('cancel-scan-btn').style.display = 'inline-block';
         document.getElementById('scan-full-btn').disabled = true;
         document.getElementById('scan-incremental-btn').disabled = true;
@@ -558,15 +569,19 @@ function pollScan() {
                 loadFiles();
             }
 
-            if (data.status === 'completed' || data.status === 'failed') {
+            if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
                 clearInterval(scanPollInterval);
                 scanPollInterval = null;
                 activeScanId = null;
+                document.getElementById('pause-scan-btn').style.display = 'none';
+                document.getElementById('resume-scan-btn').style.display = 'none';
                 setButtonLoading('scan-full-btn', false, 'Scan Library (Full)');
                 setButtonLoading('scan-incremental-btn', false, 'Scan New Only');
 
                 if (data.status === 'failed') {
                     document.getElementById('cancel-scan-btn').style.display = 'none';
+                    document.getElementById('pause-scan-btn').style.display = 'none';
+                    document.getElementById('resume-scan-btn').style.display = 'none';
                     document.getElementById('scan-progress-text').textContent = 'Scan failed: ' + (data.error_message || 'Unknown error');
                     showToast('Scan failed: ' + (data.error_message || 'Unknown error'), 'error', 6000);
                 } else {
@@ -578,6 +593,8 @@ function pollScan() {
                 // Auto-hide progress bar after 5 seconds
                 setTimeout(function() {
                     document.getElementById('cancel-scan-btn').style.display = 'none';
+                    document.getElementById('pause-scan-btn').style.display = 'none';
+                    document.getElementById('resume-scan-btn').style.display = 'none';
                     document.getElementById('scan-progress').style.display = 'none';
                 }, 5000);
 
@@ -591,7 +608,7 @@ function pollScan() {
     }, 2000);
 }
 
-// ── Cancel Scan ──
+// ── Cancel / Pause / Resume ──
 async function cancelScan() {
     if (!confirm('Cancel the running scan? Already processed files will be kept.')) return;
     // Find active scan from status API (survives page refresh)
@@ -619,6 +636,8 @@ async function cancelScan() {
             scanPollInterval = null;
             activeScanId = null;
             document.getElementById('cancel-scan-btn').style.display = 'none';
+            document.getElementById('pause-scan-btn').style.display = 'none';
+            document.getElementById('resume-scan-btn').style.display = 'none';
             document.getElementById('scan-progress').style.display = 'none';
             document.getElementById('scan-full-btn').disabled = false;
             document.getElementById('scan-incremental-btn').disabled = false;
@@ -630,6 +649,48 @@ async function cancelScan() {
     } catch (e) {
         showToast('Cancel error: ' + e.message, 'error');
     }
+}
+
+async function pauseScan() {
+    let scanId = activeScanId;
+    if (!scanId) {
+        try { const sResp = await fetch('/api/library/status'); const sData = await sResp.json(); scanId = sData.active_scan_id; } catch (e) {}
+    }
+    if (!scanId) { showToast('No active scan found', 'error'); return; }
+    try {
+        const resp = await fetch('/api/library/scan/' + scanId + '/pause', {
+            method: 'PUT', headers: {'X-API-Key': API_KEY},
+        });
+        const data = await resp.json();
+        if (data.status === 'paused') {
+            showToast('Scan paused', 'info');
+            document.getElementById('pause-scan-btn').style.display = 'none';
+            document.getElementById('resume-scan-btn').style.display = 'inline-block';
+        } else {
+            showToast('Pause failed: ' + (data.error || 'Unknown'), 'error');
+        }
+    } catch (e) { showToast('Pause error: ' + e.message, 'error'); }
+}
+
+async function resumeScan() {
+    let scanId = activeScanId;
+    if (!scanId) {
+        try { const sResp = await fetch('/api/library/status'); const sData = await sResp.json(); scanId = sData.active_scan_id; } catch (e) {}
+    }
+    if (!scanId) { showToast('No paused scan found', 'error'); return; }
+    try {
+        const resp = await fetch('/api/library/scan/' + scanId + '/resume', {
+            method: 'PUT', headers: {'X-API-Key': API_KEY},
+        });
+        const data = await resp.json();
+        if (data.status === 'running') {
+            showToast('Scan resumed', 'info');
+            document.getElementById('resume-scan-btn').style.display = 'none';
+            document.getElementById('pause-scan-btn').style.display = 'inline-block';
+        } else {
+            showToast('Resume failed: ' + (data.error || 'Unknown'), 'error');
+        }
+    } catch (e) { showToast('Resume error: ' + e.message, 'error'); }
 }
 
 // ── Bulk Retry ──

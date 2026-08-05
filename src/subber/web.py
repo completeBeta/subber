@@ -1009,6 +1009,13 @@ async def api_download_sub(file_id: str, request: Request, _=Depends(_require_wr
                     provider_name = key
                     break
         if not provider:
+            # Prefix match for abbreviated IDs (e.g. "os" → "OpenSubtitles")
+            for key in registry.names:
+                if key.lower().startswith(provider_name_lower):
+                    provider = registry.get(key)
+                    provider_name = key
+                    break
+        if not provider:
             return JSONResponse(content={"error": f"Provider '{provider_name}' not found"}, status_code=400)
 
         # Prefer metadata supplied by the client (from the search response)
@@ -1890,6 +1897,28 @@ async def api_library_scan_cancel(scan_id: str, _=Depends(_require_write_auth)):
         return JSONResponse(content={"error": "Scan not found or already completed"}, status_code=404)
     _libdb.update_scan(sid, status="cancelled", error_message="Cancelled by user")
     return JSONResponse(content={"scan_id": sid, "status": "cancelled"})
+
+@app.put("/api/library/scan/{scan_id}/pause")
+async def api_library_scan_pause(scan_id: str, _=Depends(_require_write_auth)):
+    """Pause a running library scan."""
+    try:
+        sid = int(scan_id)
+    except ValueError:
+        return JSONResponse(content={"error": "Invalid scan ID"}, status_code=400)
+    if _libpipe.pause_scan(sid):
+        return JSONResponse(content={"scan_id": sid, "status": "paused"})
+    return JSONResponse(content={"error": "Scan not found or not running"}, status_code=404)
+
+@app.put("/api/library/scan/{scan_id}/resume")
+async def api_library_scan_resume(scan_id: str, _=Depends(_require_write_auth)):
+    """Resume a paused library scan."""
+    try:
+        sid = int(scan_id)
+    except ValueError:
+        return JSONResponse(content={"error": "Invalid scan ID"}, status_code=400)
+    if _libpipe.resume_scan(sid):
+        return JSONResponse(content={"scan_id": sid, "status": "running"})
+    return JSONResponse(content={"error": "Scan not found or not paused"}, status_code=404)
 
 @app.get("/api/library/status")
 async def api_library_status():

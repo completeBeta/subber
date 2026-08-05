@@ -447,7 +447,7 @@ def get_active_scan() -> dict | None:
         conn = _connect()
         try:
             row = conn.execute(
-                "SELECT * FROM scan_history WHERE status = 'running' ORDER BY id DESC LIMIT 1"
+                "SELECT * FROM scan_history WHERE status IN ('running', 'paused') ORDER BY id DESC LIMIT 1"
             ).fetchone()
             return dict(row) if row else None
         finally:
