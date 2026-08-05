@@ -999,7 +999,17 @@ async def api_download_sub(file_id: str, request: Request, _=Depends(_require_wr
     try:
         # file_id format: "providername_restofid"
         provider_name, _, rest_id = file_id.partition("_")
-        # Case-insensitive lookup (file_id prefix is lowercased; registry keys are mixed-case)
+        # Resolve provider name: exact → case-insensitive → alias map
+        # (search results use abbreviations like "os" for OpenSubtitles)
+        _PROVIDER_ALIASES = {
+            "os": "OpenSubtitles",
+            "opensubtitles": "OpenSubtitles",
+            "subdl": "SubDL",
+            "addic7ed": "Addic7ed",
+            "podnapisi": "Podnapisi",
+            "subscene": "Subscene",
+            "embedded": "Embedded",
+        }
         provider = registry.get(provider_name)
         if not provider:
             provider_name_lower = provider_name.lower()
@@ -1008,13 +1018,11 @@ async def api_download_sub(file_id: str, request: Request, _=Depends(_require_wr
                     provider = registry.get(key)
                     provider_name = key
                     break
-        if not provider:
-            # Prefix match for abbreviated IDs (e.g. "os" → "OpenSubtitles")
-            for key in registry.names:
-                if key.lower().startswith(provider_name_lower):
-                    provider = registry.get(key)
-                    provider_name = key
-                    break
+        if not provider and provider_name_lower in _PROVIDER_ALIASES:
+            alias_target = _PROVIDER_ALIASES[provider_name_lower]
+            provider = registry.get(alias_target)
+            if provider:
+                provider_name = alias_target
         if not provider:
             return JSONResponse(content={"error": f"Provider '{provider_name}' not found"}, status_code=400)
 

@@ -157,7 +157,19 @@ class OpenSubtitlesProvider(SubtitleProvider):
             params["episode_number"] = episode
 
         resp = await self._client.get("/subtitles", params=params)
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            detail = ""
+            try:
+                body = resp.json()
+                detail = body.get("message", "") or json.dumps(body)
+            except Exception:
+                detail = resp.text[:300]
+            raise httpx.HTTPStatusError(
+                f"{e}\nOpenSubtitles API response: {detail}",
+                request=e.request, response=e.response,
+            ) from e
         return self._format_results(resp.json().get("data", []))
 
     async def search_by_hash(
@@ -174,7 +186,19 @@ class OpenSubtitlesProvider(SubtitleProvider):
             "moviebytesize": file_size,
             "languages": language,
         })
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            detail = ""
+            try:
+                body = resp.json()
+                detail = body.get("message", "") or json.dumps(body)
+            except Exception:
+                detail = resp.text[:300]
+            raise httpx.HTTPStatusError(
+                f"{e}\nOpenSubtitles API response: {detail}",
+                request=e.request, response=e.response,
+            ) from e
         return self._format_results(resp.json().get("data", []))
 
     # ── Download ──
@@ -189,7 +213,23 @@ class OpenSubtitlesProvider(SubtitleProvider):
             headers["Authorization"] = f"Bearer {self._token}"
 
         resp = await self._client.post("/download", json={"file_id": file_id}, headers=headers)
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            # Surface the API's actual error body — OpenSubtitles hides the real
+            # reason (e.g. quota exceeded) behind generic 406/404 status codes
+            detail = ""
+            try:
+                body = resp.json()
+                detail = body.get("message", "")
+                if not detail:
+                    detail = json.dumps(body)
+            except Exception:
+                detail = resp.text[:300]
+            raise httpx.HTTPStatusError(
+                f"{e}\nOpenSubtitles API response: {detail}",
+                request=e.request, response=e.response,
+            ) from e
         data = resp.json()
 
         download_url = data.get("link") or data.get("file_name")
@@ -215,7 +255,7 @@ class OpenSubtitlesProvider(SubtitleProvider):
         for r in raw:
             attrs = r.get("attributes", {})
             results.append(SubtitleResult(
-                id=f"os_{r['id']}",
+                id=f"opensubtitles_{r['id']}",
                 filename=attrs.get("filename", "unknown"),
                 language=attrs.get("language", "?"),
                 provider="OpenSubtitles",
