@@ -258,6 +258,24 @@ def query_files(
             conn.close()
 
 
+def get_unprocessed_files() -> list[dict]:
+    """Return all files that still need processing (not done/skipped).
+
+    Used by resume to skip the filesystem walk and process straight from the
+    DB — the walk already populated the table, so re-walking 24K files over
+    CIFS would just waste 20-40 minutes.
+    """
+    with _lock:
+        conn = _connect()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM library_files WHERE status NOT IN ('done', 'skipped')"
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+
 def get_all_pending() -> list[dict]:
     """Get all files with status 'pending'."""
     with _lock:

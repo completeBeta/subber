@@ -378,6 +378,7 @@ def scan_library(
     library_paths: list[str],
     incremental: bool = False,
     existing_hashes: set[str] | None = None,
+    should_abort=None,
 ) -> list[dict]:
     """Walk library paths and return a list of video file records.
 
@@ -388,6 +389,9 @@ def scan_library(
         library_paths: List of root directories to scan.
         incremental: If True, skip files whose hash is in existing_hashes.
         existing_hashes: Set of file hashes already in the DB (for incremental scans).
+        should_abort: Optional callback; when it returns True the walk stops
+            early and returns whatever has been collected so far. Used to make
+            pause/cancel work during the (otherwise silent) filesystem walk.
 
     Returns list of file record dicts.
     """
@@ -402,7 +406,12 @@ def scan_library(
     records = []
     seen_paths = set()
 
+    def _abort():
+        return should_abort is not None and should_abort()
+
     for root_path_str in library_paths:
+        if _abort():
+            break
         root = Path(root_path_str)
         if not root.exists():
             continue
@@ -410,6 +419,8 @@ def scan_library(
         # Use os.scandir for CIFS performance (avoids stat overhead of glob/rglob)
         _WALKED = 0
         for show_entry in os.scandir(root):
+            if _abort():
+                return records
             # Video files directly in the library root (e.g. loose movies)
             if show_entry.is_file() and Path(show_entry.path).suffix.lower() in _VID_EXTS:
                 _WALKED += 1
@@ -419,8 +430,12 @@ def scan_library(
                 continue
             show_path = Path(show_entry.path)
             for season_entry in os.scandir(show_path):
+                if _abort():
+                    return records
                 if season_entry.is_dir():
                     for file_entry in os.scandir(Path(season_entry.path)):
+                        if _abort():
+                            return records
                         if file_entry.is_file() and Path(file_entry.path).suffix.lower() in _VID_EXTS:
                             _WALKED += 1
                             _process_one(Path(file_entry.path), root, seen_paths, records, incremental, existing_hashes)

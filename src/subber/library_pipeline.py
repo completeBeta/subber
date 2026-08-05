@@ -82,6 +82,7 @@ async def run_scan(
     media_types: list[str] | None = None,
     max_concurrent: int = 2,
     drift_threshold_ms: int = 200,
+    skip_walk: bool = False,
 ) -> int:
     """Run a library scan and process files.
 
@@ -92,6 +93,9 @@ async def run_scan(
         media_types: Filter to ['tv'], ['movie'], or None for both
         max_concurrent: Max parallel file processing
         drift_threshold_ms: Sync only if drift exceeds this
+        skip_walk: If True, skip the filesystem walk and load unprocessed files
+            from the DB instead (used by resume — the walk already populated
+            the table, so re-walking 24K files would waste 20-40 minutes).
 
     Returns scan_id from the DB.
     """
@@ -129,12 +133,32 @@ async def run_scan(
         for name, err in mount_errors.items():
             print(f"[LIBRARY] Mount failed for {name}: {err}", flush=True)
 
-    # Scan filesystem
+    # Scan filesystem (abort callback lets pause/cancel interrupt the walk)
     loop = asyncio.get_running_loop()
-    records = await loop.run_in_executor(
-        None,
-        lambda: library_scanner.scan_library(paths, incremental=incremental, existing_hashes=existing_hashes),
-    )
+    if skip_walk:
+        # Resume path — walk already populated the DB; process remaining files.
+        # Reset any stale in_progress files (from a previous scan that died)
+        # so they get re-processed instead of staying stuck forever.
+        reset = library_db.mark_stale_in_progress()
+        if reset:
+            print(f"[LIBRARY] Reset {reset} stale in_progress files", flush=True)
+        records = library_db.get_unprocessed_files()
+        print(f"[LIBRARY] Skipping walk — {len(records)} unprocessed files from DB", flush=True)
+    else:
+        records = await loop.run_in_executor(
+            None,
+            lambda: library_scanner.scan_library(
+                paths,
+                incremental=incremental,
+                existing_hashes=existing_hashes,
+                should_abort=lambda: _is_cancelled(scan_id) or _is_paused(scan_id),
+            ),
+        )
+
+    # If paused/cancelled during walk, stop here (don't mark completed)
+    if _is_paused(scan_id) or _is_cancelled(scan_id):
+        print(f"[LIBRARY] Scan {scan_id} stopped during walk (paused={_is_paused(scan_id)}, cancelled={_is_cancelled(scan_id)})", flush=True)
+        return scan_id
 
     # Filter by media type if requested
     if media_types:

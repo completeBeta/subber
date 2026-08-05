@@ -1974,6 +1974,7 @@ async def api_library_scan_resume(scan_id: str, _=Depends(_require_write_auth)):
                     media_types=None,
                     max_concurrent=max_concurrent,
                     drift_threshold_ms=drift_threshold,
+                    skip_walk=True,  # DB already has the file list — don't re-walk 24K files
                 )
                 _lib_active_scans[sid] = {"status": "completed", **_lib_active_scans.get(sid, {})}
             except Exception as e:
