@@ -2279,8 +2279,26 @@ async def api_logs_download():
 async def api_logs_stats():
     """Return today's provider API call stats."""
     from .providers import provider_stats
+    from .providers.opensubtitles import OpenSubtitlesProvider, USAGE_FILE
     today_stats = provider_stats.get_today_stats()
     all_stats = provider_stats.get_stats(days=7)
+
+    # OpenSubtitles download counts tracked by provider_stats can drift from the
+    # API's real quota (the API returns 406 with the authoritative number, which
+    # the provider syncs into its usage file). Override with the synced count.
+    try:
+        usage = json.loads(USAGE_FILE.read_text())
+        from datetime import datetime as _dt, timezone as _tz
+        today = _dt.now(_tz.utc).strftime("%Y-%m-%d")
+        synced = int(usage.get(today, 0))
+        if "OpenSubtitles" in today_stats:
+            today_stats["OpenSubtitles"]["downloads"] = synced
+        for date_str, providers in all_stats.items():
+            if "OpenSubtitles" in providers and date_str in usage:
+                providers["OpenSubtitles"]["downloads"] = int(usage[date_str])
+    except Exception:
+        pass
+
     return JSONResponse(content={
         "today": today_stats,
         "history": all_stats,
