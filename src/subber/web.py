@@ -177,36 +177,42 @@ def _get_translator():
 # Page routes
 # ═══════════════════════════════════════════════
 
+_NO_CACHE_HEADERS = {"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"}
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     template = jinja_env.get_template("index.html")
-    return HTMLResponse(template.render(request=request))
+    return HTMLResponse(template.render(request=request), headers=_NO_CACHE_HEADERS)
 
 
 @app.get("/sync", response_class=HTMLResponse)
 async def sync_page(request: Request):
     template = jinja_env.get_template("sync.html")
-    return HTMLResponse(template.render(request=request))
+    return HTMLResponse(template.render(request=request), headers=_NO_CACHE_HEADERS)
 
 
 @app.get("/search", response_class=HTMLResponse)
 async def search_page(request: Request):
     template = jinja_env.get_template("search.html")
     api_key = (config.get().get("ui", {}) or {}).get("api_key", "")
-    return HTMLResponse(template.render(request=request, api_key=api_key))
+    return HTMLResponse(template.render(request=request, api_key=api_key), headers=_NO_CACHE_HEADERS)
 
 
 @app.get("/grab", response_class=HTMLResponse)
 async def grab_page(request: Request):
     template = jinja_env.get_template("grab.html")
-    return HTMLResponse(template.render(request=request))
+    return HTMLResponse(template.render(request=request), headers=_NO_CACHE_HEADERS)
 
 
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request):
     template = jinja_env.get_template("settings.html")
     api_key = (config.get().get("ui", {}) or {}).get("api_key", "")
-    return HTMLResponse(template.render(request=request, api_key=api_key))
+    return HTMLResponse(
+        template.render(request=request, api_key=api_key),
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+    )
 
 
 # ═══════════════════════════════════════════════
@@ -1818,7 +1824,10 @@ _lib_active_scans: dict = {}  # scan_id → {status, progress, files_total, file
 @app.get("/library", response_class=HTMLResponse)
 async def library_page(request: Request):
     api_key = (config.get().get("ui", {}) or {}).get("api_key", "")
-    return jinja_env.get_template("library.html").render(api_key=api_key)
+    return HTMLResponse(
+        jinja_env.get_template("library.html").render(api_key=api_key),
+        headers=_NO_CACHE_HEADERS,
+    )
 
 @app.post("/api/library/scan")
 async def api_library_scan(request: Request, _=Depends(_require_write_auth)):
@@ -2262,7 +2271,10 @@ async def _init_library_db():
 
 @app.get("/logs", response_class=HTMLResponse)
 async def logs_page(request: Request):
-    return jinja_env.get_template("logs.html").render()
+    return HTMLResponse(
+        jinja_env.get_template("logs.html").render(),
+        headers=_NO_CACHE_HEADERS,
+    )
 
 
 @app.get("/api/logs")
