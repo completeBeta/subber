@@ -1923,14 +1923,56 @@ async def api_library_scan_pause(scan_id: str, _=Depends(_require_write_auth)):
 
 @app.put("/api/library/scan/{scan_id}/resume")
 async def api_library_scan_resume(scan_id: str, _=Depends(_require_write_auth)):
-    """Resume a paused library scan."""
+    """Resume a paused library scan.
+
+    If the scan task is still alive in this process, just flip the DB flag.
+    If the task died (e.g. container restart), spawn a fresh scan reusing the
+    same scan_id — _process_file skips already-done files, so this safely picks
+    up where the old scan left off without redoing completed work.
+    """
     try:
         sid = int(scan_id)
     except ValueError:
         return JSONResponse(content={"error": "Invalid scan ID"}, status_code=400)
-    if _libpipe.resume_scan(sid):
+
+    # Live task still running → just unpause it
+    if sid in _lib_active_scans and _lib_active_scans[sid].get("status") == "running":
+        _libpipe.resume_scan(sid)
         return JSONResponse(content={"scan_id": sid, "status": "running"})
-    return JSONResponse(content={"error": "Scan not found or not paused"}, status_code=404)
+
+    # No live task (restart or dead task) → verify the scan exists and isn't finished
+    scan = _libdb.get_scan(sid)
+    if not scan:
+        return JSONResponse(content={"error": "Scan not found"}, status_code=404)
+    if scan.get("status") in ("completed", "failed", "cancelled"):
+        return JSONResponse(content={"error": "Scan not found or not paused"}, status_code=404)
+
+    lib_cfg = _subber_config.get_section("library")
+    max_concurrent = lib_cfg.get("max_concurrent", 2)
+    drift_threshold = lib_cfg.get("drift_threshold_ms", 200)
+
+    _libdb.update_scan(sid, status="running", error_message=None)
+    _lib_active_scans[sid] = {"status": "running", "files_total": 0, "files_processed": 0}
+
+    async def _run_resumed_scan():
+        async with _lib_scan_lock:
+            try:
+                await _libpipe.run_scan(
+                    scan_id=sid,
+                    scan_type="full",  # _process_file skips done files anyway
+                    paths=None,
+                    dry_run=False,
+                    media_types=None,
+                    max_concurrent=max_concurrent,
+                    drift_threshold_ms=drift_threshold,
+                )
+                _lib_active_scans[sid] = {"status": "completed", **_lib_active_scans.get(sid, {})}
+            except Exception as e:
+                _lib_active_scans[sid] = {"status": "failed", "error": str(e)}
+                _libdb.update_scan(sid, status="failed", error_message=str(e))
+
+    asyncio.create_task(_run_resumed_scan())
+    return JSONResponse(content={"scan_id": sid, "status": "running"})
 
 @app.get("/api/library/status")
 async def api_library_status():
