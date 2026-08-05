@@ -58,16 +58,18 @@ class OpenSubtitlesProvider(SubtitleProvider):
         # daily_limit: explicit override takes priority, else tier-based default
         if daily_limit > 0:
             self._daily_limit = daily_limit
-        elif tier == "vip":
-            self._daily_limit = 1000  # .org VIP auth = 1,000/day
         elif tier == "lite":
-            self._daily_limit = 2000  # .com Lite plan = 2,000/day
+            self._daily_limit = 2000   # Light plan = 2,000/day
+        elif tier == "startup":
+            self._daily_limit = 5000   # Startup plan = 5,000/day
+        elif tier == "basic":
+            self._daily_limit = 15000  # Basic plan = 15,000/day
         elif tier == "premium":
-            self._daily_limit = 5000  # .com paid packages
-        elif tier == "custom":
-            self._daily_limit = daily_limit if daily_limit > 0 else 2000  # custom fallback
+            self._daily_limit = 50000  # Premium plan = 50,000/day
+        elif tier == "pro":
+            self._daily_limit = 100000 # Pro plan = 100,000/day
         else:
-            self._daily_limit = 5     # free tier
+            self._daily_limit = 5      # free tier
         self._token: str | None = None
         self._client = httpx.AsyncClient(
             base_url=API_BASE,

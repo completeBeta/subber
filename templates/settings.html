@@ -218,20 +218,16 @@
                 <div class="hint">Get one at <a href="https://www.opensubtitles.com/en/consumers" target="_blank" style="color: var(--accent);">opensubtitles.com/consumers</a></div>
             </div>
             <div class="form-group">
-                <label for="opensubtitles-tier">Daily Limit</label>
+                <label for="opensubtitles-tier">Plan</label>
                 <select id="opensubtitles-tier" name="providers.opensubtitles.tier">
                     <option value="free">Free (5 downloads/day)</option>
-                    <option value="vip">VIP — .org auth (1,000/day)</option>
-                    <option value="lite">Lite — .com API (2,000/day)</option>
-                    <option value="premium">Premium — .com API (5,000/day)</option>
-                    <option value="custom">Custom — set your own daily limit</option>
+                    <option value="lite">Light (2,000 downloads/day)</option>
+                    <option value="startup">Startup (5,000 downloads/day)</option>
+                    <option value="basic">Basic (15,000 downloads/day)</option>
+                    <option value="premium">Premium (50,000 downloads/day)</option>
+                    <option value="pro">Pro (100,000 downloads/day)</option>
                 </select>
-            </div>
-            <div class="form-group">
-                <label for="opensubtitles-daily-limit">Custom daily limit (overrides tier)</label>
-                <input type="number" id="opensubtitles-daily-limit" name="providers.opensubtitles.daily_limit"
-                       placeholder="0 = use tier default" min="0" max="50000" style="width: 200px;">
-                <div class="hint">Set to 0 to use the tier default above. Max 50,000/day for enterprise packages.</div>
+                <div class="hint">Select the plan your API consumer key is subscribed to. Daily limit resets at midnight UTC.</div>
             </div>
         </div>
 
@@ -395,13 +391,11 @@ async function loadSettings() {
         document.getElementById('subdl-pro-mode').checked = (cfg.providers?.subdl?.pro_mode) || false;
         // OpenSubtitles settings
         const osCfg = prov.opensubtitles || {};
-        // If a custom daily limit is set, show the "custom" tier option
         const osTier = osCfg.tier || 'free';
         document.getElementById('opensubtitles-tier').value = osTier;
         document.getElementById('opensubtitles-api-key').value = osCfg.api_key || '';
         document.getElementById('opensubtitles-username').value = osCfg.username || '';
         document.getElementById('opensubtitles-password').value = osCfg.password || '';
-        document.getElementById('opensubtitles-daily-limit').value = osCfg.daily_limit || 0;
         loadOpenSubtitlesUsage();
         document.getElementById('addic7ed-cookies').value = prov.addic7ed?.cookies || '';
         // Library settings
@@ -528,7 +522,6 @@ async function saveSettings() {
                     api_key: document.getElementById('opensubtitles-api-key').value,
                     username: document.getElementById('opensubtitles-username').value,
                     password: document.getElementById('opensubtitles-password').value,
-                    daily_limit: numOr('opensubtitles-daily-limit', 0),
                 },
                 
             }
