@@ -537,6 +537,10 @@ async def _extract_embedded_sub(file_path: Path, language: str) -> tuple[Path, s
 
     out_path = file_path.parent / f"{base_stem}.{best_embedded.language}.{ext}"
 
+    # Skip extraction if subtitle file already exists (from a previous run)
+    if out_path.exists() and out_path.stat().st_size > 0:
+        return out_path, best_embedded.language
+
     # Use EmbeddedProvider.download which uses the correct track index
     await embedded_prov.download(best_embedded, out_path)
 
