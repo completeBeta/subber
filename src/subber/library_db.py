@@ -112,6 +112,43 @@ def upsert_file(record: dict) -> int:
             conn.close()
 
 
+def bulk_upsert(records: list[dict]) -> int:
+    """Insert/update many file records in ONE transaction (fast bulk path).
+
+    Used for the initial upsert-all-files phase of a scan — 22K individual
+    commits would hold the DB lock for minutes and block API calls.
+    Returns number of records written.
+    """
+    if not records:
+        return 0
+    with _lock:
+        conn = _connect()
+        try:
+            cols = [
+                "file_path", "file_hash", "file_size", "media_type",
+                "show_title", "season", "episode", "episode_title",
+                "movie_title", "movie_year",
+                "subtitle_status", "subtitle_languages",
+                "action_taken", "subtitle_path", "provider_used", "model_used",
+                "sync_drift_ms", "translation_cost", "status", "error_message",
+            ]
+            placeholders = ",".join(["?"] * len(cols))
+            col_list = ",".join(cols)
+            update_set = ",".join([f"{c}=excluded.{c}" for c in cols if c != "file_path"])
+            update_set += ",updated_at=datetime('now')"
+            rows = [[record.get(c) for c in cols] for record in records]
+            conn.executemany(
+                f"""INSERT INTO library_files ({col_list})
+                    VALUES ({placeholders})
+                    ON CONFLICT(file_path) DO UPDATE SET {update_set}""",
+                rows,
+            )
+            conn.commit()
+            return len(records)
+        finally:
+            conn.close()
+
+
 def get_file(file_id: int) -> dict | None:
     """Get a single file by ID."""
     with _lock:

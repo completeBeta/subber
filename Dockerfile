@@ -28,4 +28,7 @@ COPY static/ static/
 
 EXPOSE 8676
 
-CMD ["uvicorn", "src.subber.web:app", "--host", "0.0.0.0", "--port", "8676", "--workers", "4"]
+# Single worker — the app keeps scan state, config cache, and locks in memory.
+# Multiple workers give each process its own copy, causing duplicate scans,
+# stale config, and dead locks (no shared state). Single user + async = 1 worker.
+CMD ["uvicorn", "src.subber.web:app", "--host", "0.0.0.0", "--port", "8676", "--workers", "1"]

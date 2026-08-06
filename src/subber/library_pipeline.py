@@ -197,9 +197,9 @@ async def run_scan(
 
     mounts = _get_mounts()
     # Mount SMB shares before processing
-    # Real processing — upsert all files first, then process concurrently
-    for record in records:
-        library_db.upsert_file(record)
+    # Real processing — upsert all files first, then process concurrently.
+    # Single bulk transaction: fast AND doesn't block API calls on the DB lock.
+    library_db.bulk_upsert(records)
 
     semaphore = asyncio.Semaphore(max_concurrent)
     tasks = [
@@ -920,25 +920,39 @@ async def _search_download_and_process(
         return {"success": False, "error": "No subtitles found from any provider"}
 
     # Download best match to temp dir (avoids overwrite conflicts when
-    # multiple episodes share the same provider result filename)
-    best = results[0]
-    try:
-        import uuid, tempfile
+    # multiple episodes share the same provider result filename).
+    # Try each result in order: providers can return results with stale or
+    # invalid file_ids (e.g. OpenSubtitles "Invalid file_id"), so fall through
+    # to the next candidate rather than failing on the first.
+    import uuid, tempfile
+    best = None
+    downloaded_path = None
+    last_err = None
+    for candidate in results[:5]:
         tmp_dir = Path(tempfile.mkdtemp(prefix="subber_dl_"))
-        downloaded_path = await asyncio.wait_for(
-            registry.download(best, tmp_dir),
-            timeout=30,
-        )
-        # Move to target dir with unique name
-        tmp_name = f".subber_{uuid.uuid4().hex[:8]}_{best.filename}"
-        tmp_dest = video_path.parent / tmp_name
-        shutil.move(str(downloaded_path), str(tmp_dest))
-        shutil.rmtree(tmp_dir, ignore_errors=True)
-        downloaded_path = tmp_dest
-    except asyncio.TimeoutError:
-        return {"success": False, "error": "Download timed out"}
-    except Exception as e:
-        return {"success": False, "error": f"Download failed: {e}"}
+        try:
+            downloaded_path = await asyncio.wait_for(
+                registry.download(candidate, tmp_dir),
+                timeout=30,
+            )
+            best = candidate
+            break
+        except asyncio.TimeoutError:
+            last_err = "Download timed out"
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        except Exception as e:
+            last_err = str(e)
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    if best is None or downloaded_path is None:
+        return {"success": False, "error": f"Download failed: {last_err}"}
+
+    # Move to target dir with unique name
+    tmp_name = f".subber_{uuid.uuid4().hex[:8]}_{best.filename}"
+    tmp_dest = video_path.parent / tmp_name
+    shutil.move(str(downloaded_path), str(tmp_dest))
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+    downloaded_path = tmp_dest
 
     downloaded_path = Path(downloaded_path)
     provider_name = best.provider if hasattr(best, "provider") else "unknown"
