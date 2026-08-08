@@ -63,6 +63,10 @@
 }
 
 /* Scan Progress */
+#scan-progress {
+    margin-bottom: 1rem;
+}
+
 .scan-progress-bar {
     width: 100%;
     height: 8px;

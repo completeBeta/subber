@@ -299,6 +299,13 @@ async function checkActiveScan() {
 }
 
 // ── Files table ──
+// Change-detection: when pollScan re-fetches files every 2s, skip the DOM
+// rebuild if the data is byte-identical. Rebuilding kills text selection and
+// interrupts user actions (copying from an expanded row). The signature is
+// computed AFTER the fetch so filter/page changes naturally produce a
+// different signature and re-render.
+let lastFilesSignature = null;
+
 async function loadFiles() {
     const status = document.getElementById('status-filter').value;
     const mediaType = document.getElementById('media-type-filter').value;
@@ -327,6 +334,12 @@ async function loadFiles() {
         if (banner && status === 'failed') {
             document.getElementById('retry-banner-msg').textContent = data.total + ' file(s) failed — ';
         }
+
+        // Change detection: identical data → skip re-render (preserves DOM,
+        // text selection, and scroll). Still updates the banner above.
+        const signature = JSON.stringify({ total: data.total, files: data.files });
+        if (signature === lastFilesSignature) return;
+        lastFilesSignature = signature;
 
         totalPages = Math.ceil(data.total / pageSize) || 1;
         renderTable(data.files);
@@ -576,7 +589,8 @@ function pollScan() {
                 }
             } else {
                 document.getElementById('scan-progress-text').textContent =
-                    'Processing ' + (data.files_processed || 0) + ' of ' + (data.files_total || 0) + ' files (' + pct + '%)';
+                    'Attempted ' + (data.files_processed || 0) + ' of ' + (data.files_total || 0) +
+                    ' files this run (' + pct + '%)';
             }
 
             // Reload stats and files during scan for live updates

@@ -164,7 +164,11 @@ async def run_scan(
     if media_types:
         records = [r for r in records if r["media_type"] in media_types]
 
-    library_db.update_scan(scan_id, files_total=len(records))
+    # Reset per-run counters: files_processed accumulates across resume runs
+    # (it's a +1 per completion attempt), which made the progress bar drift
+    # far ahead of the actual files done. Reset to 0 on every run so the bar
+    # reflects THIS run's work from 0 → files_total.
+    library_db.update_scan(scan_id, files_total=len(records), files_processed=0)
 
     if dry_run:
         # In dry-run mode, just upsert records with subtitle status but don't process
