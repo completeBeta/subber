@@ -556,8 +556,28 @@ function pollScan() {
                 ? Math.round((data.files_processed / data.files_total) * 100)
                 : 0;
             document.getElementById('scan-progress-fill').style.width = pct + '%';
-            document.getElementById('scan-progress-text').textContent =
-                'Processing ' + (data.files_processed || 0) + ' of ' + (data.files_total || 0) + ' files (' + pct + '%)';
+
+            // Paused — show drain status (in-flight files finishing before full stop)
+            if (data.status === 'paused') {
+                try {
+                    const sResp = await fetch('/api/library/status');
+                    const sData = await sResp.json();
+                    const inflight = (sData.tv?.in_progress || 0) + (sData.movies?.in_progress || 0);
+                    if (inflight > 0) {
+                        document.getElementById('scan-progress-text').textContent =
+                            'Pausing… finishing ' + inflight + ' in-flight file' + (inflight === 1 ? '' : 's') +
+                            ' (progress ' + (data.files_processed || 0) + '/' + (data.files_total || 0) + ')';
+                    } else {
+                        document.getElementById('scan-progress-text').textContent =
+                            'Paused — ' + (data.files_processed || 0) + '/' + (data.files_total || 0) + ' processed. Click ▶ Resume to continue.';
+                    }
+                } catch (e) {
+                    document.getElementById('scan-progress-text').textContent = 'Paused';
+                }
+            } else {
+                document.getElementById('scan-progress-text').textContent =
+                    'Processing ' + (data.files_processed || 0) + ' of ' + (data.files_total || 0) + ' files (' + pct + '%)';
+            }
 
             // Reload stats and files during scan for live updates
             if (pct > 0 && pct < 100) {

@@ -282,8 +282,17 @@ class OpenSubtitlesProvider(SubtitleProvider):
         results = []
         for r in raw:
             attrs = r.get("attributes", {})
+            # OpenSubtitles has two ID types: the subtitle RECORD id (r['id'])
+            # and the downloadable FILE id (attrs.files[0].file_id). The /download
+            # endpoint expects the FILE id — sending the record id fails with
+            # "Invalid file_id" on multi-file records. Prefer files[0].file_id.
+            files = attrs.get("files") or []
+            dl_file_id = None
+            if isinstance(files, list) and files and isinstance(files[0], dict):
+                dl_file_id = files[0].get("file_id")
+            dl_file_id = dl_file_id or r["id"]
             results.append(SubtitleResult(
-                id=f"opensubtitles_{r['id']}",
+                id=f"opensubtitles_{dl_file_id}",
                 filename=attrs.get("filename", "unknown"),
                 language=attrs.get("language", "?"),
                 provider="OpenSubtitles",
@@ -291,7 +300,7 @@ class OpenSubtitlesProvider(SubtitleProvider):
                 rating=float(attrs.get("rating", 0)),
                 hearing_impaired=attrs.get("hearing_impaired", False),
                 release_info=attrs.get("release", ""),
-                metadata={"file_id": r["id"]},
+                metadata={"file_id": dl_file_id},
             ))
         return results
 
