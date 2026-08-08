@@ -532,7 +532,7 @@ async function saveSettings() {
             values: {
                 
                 drift_threshold_ms: parseInt(document.getElementById('cfg-drift-threshold').value) || 200,
-                max_concurrent: parseInt(document.getElementById('cfg-max-concurrent').value) || 2,
+                max_concurrent: parseInt(document.getElementById('cfg-max-concurrent').value) || 8,
                 scan_interval_hours: parseInt(document.getElementById('cfg-scan-interval').value) || 0,
                 dry_run_default: document.getElementById('cfg-dry-run-default').checked,
                 use_identification: document.getElementById('cfg-use-identification').checked,

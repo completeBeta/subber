@@ -335,6 +335,11 @@ async def api_update_config(request: Request, _=Depends(_require_write_auth)):
         current = config.get().get(section)
         if isinstance(current, dict) and isinstance(values, dict):
             values = _restore_masked(values, current)
+            # Defense: strip any nested request-wrapper keys that a malformed
+            # client could inject (e.g. {"section": ..., "values": ...} saved
+            # as if they were config keys). These corrupt the stored config.
+            for junk_key in ("section", "values"):
+                values.pop(junk_key, None)
         updated = config.update(section, values)
         return {"ok": True, "section": section, "values": updated}
     except KeyError:

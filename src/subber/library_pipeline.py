@@ -202,12 +202,22 @@ async def run_scan(
     library_db.bulk_upsert(records)
 
     semaphore = asyncio.Semaphore(max_concurrent)
-    tasks = [
-        _process_file_with_semaphore(semaphore, record, scan_id, drift_threshold_ms)
-        for record in records
-    ]
 
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+    # Process in bounded batches instead of building all ~21K tasks at once.
+    # Holding every coroutine + result in memory simultaneously made the scan
+    # grow to ~1.6GB RSS and get OOM-killed (container crash → "stuck" scan).
+    results: list = []
+    BATCH_SIZE = max(4, max_concurrent * 4)
+    for i in range(0, len(records), BATCH_SIZE):
+        if _is_cancelled(scan_id):
+            break
+        chunk = records[i:i + BATCH_SIZE]
+        tasks = [
+            _process_file_with_semaphore(semaphore, record, scan_id, drift_threshold_ms)
+            for record in chunk
+        ]
+        chunk_results = await asyncio.gather(*tasks, return_exceptions=True)
+        results.extend(chunk_results)
 
     processed = sum(1 for r in results if not isinstance(r, Exception))
     failed = sum(1 for r in results if isinstance(r, Exception))
