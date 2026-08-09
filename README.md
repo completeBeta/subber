@@ -2,7 +2,7 @@
 
 **Subtitle grabber, sync, and translator — Docker + Web UI.**
 
-Upload a video, Subber finds subtitles across 6 providers, syncs them with ffsubsync, and translates non-English subs using DeepSeek or Ollama. Or scan your entire media library and Subber handles everything automatically.
+Upload a video, Subber finds subtitles across 6 providers, syncs them with ffsubsync, and translates non-English subs using **OpenRouter Llama 3.1 8B** (recommended — fast, cheap, accurate) with DeepSeek or Ollama as fallbacks. Or scan your entire media library and Subber handles everything automatically.
 
 ## 🚀 Quick Start (Docker)
 
@@ -20,7 +20,8 @@ cp docker-compose.example.yml docker-compose.yml
 ### 2. Edit your config
 
 **`config/config.yaml`** — add your API keys (all optional, but recommended):
-- `translation.backends[0].api_key` — DeepSeek API key (for translation)
+- `translation.backends[0].api_key` — OpenRouter API key (for translation, recommend Llama 3.1 8B ~$1 to translate hundreds of episodes)
+- `translation.backends[1+]` — DeepSeek, Ollama, or any OpenAI-compatible fallback
 - `providers.subdl.api_key` — free from [subdl.com](https://subdl.com)
 - `providers.opensubtitles` — see [OpenSubtitles Setup](#-opensubtitles-setup) below
 
@@ -65,15 +66,21 @@ Scan your media library — Subber walks directories, classifies files as TV/mov
 - **Content-based language verification** — reads subtitle content to verify ffprobe language tags
 - **Provider search with identified titles** — uses canonical English titles for higher match rates
 - **Embedded subtitle extraction** with smart track selection (prefers dialogue tracks)
-- **DeepSeek translation** for foreign-language embedded subs (~5 min/episode)
+- **OpenRouter Llama 3.1 8B** translation (recommended — fast, cheap, accurate) with DeepSeek/Ollama fallback
 - **ffsubsync audio alignment** for all subtitles
+- **Zip/gzip subtitle pack unpacking** — zip/gzip downloads are extracted and episode-matched before sync
+- **Episode guard** — prevents wrong-episode downloads from fallback provider search
+- **CIFS robustness** — move-to-share retries with backoff; stale/inaccessible files handled gracefully
+- **Mount dead-man switch** — scan aborts cleanly when all SMB mounts are down (instead of failing thousands of files)
+- **Configurable extraction timeout** — ffmpeg timeout tunable via env var (default 900s) with concurrency cap
 - **SQLite persistence** — scan state, file metadata, costs, and timing all stored
 - **Smart rescan** — "Scan New Only" picks up genuinely new files; "Scan Library (Full)" rescans everything
 - **📄 Reports** — click ☰ Reports to generate/save/view Markdown reports with success/fail/pending breakdowns and action items
 - **Live auto-update** — file list refreshes during scans, expanded detail rows persist across updates
 - **Clickable status pills** — click Total/Done/Pending/Failed/Skipped to filter instantly
 - **Progress tracking** — per-file progress bar increments in real time during scans
-- **Bulk retry** — one-click "Retry All Failed" banner when viewing failed files
+- **Bulk retry** — one-click "Retry All Failed" banner when viewing failed files; retries auto-remount shares
+- **💾 DB Backups** — auto backup before every scan + manual Backup Now; import/export/restore with safety snapshots; 5-backup rotation
 - **Cost tracking** — per-file translation cost with accurate DeepSeek pricing (input+output tokens)
 - **Smart fansub stripping** — removes [GroupName] tags and hex hashes from show titles
 - **OpenSubtitles fallback** — only searched when primary providers find nothing, saving quota
@@ -90,18 +97,20 @@ Upload `.srt`, `.ass`, `.vtt`, or `.zip` files for translation. Multi-backend su
 Search all enabled providers by show name, season, and episode. Returns results with download links.
 
 ### 📋 Logs
-Real-time log viewer with search, level filter, auto-refresh, and log file download. Shows live **API call stats** per provider (searches/downloads today).
+Real-time log viewer with search, level filter, auto-refresh, **full-history export**, and **redacted diagnostics bundle** (safe for bug reports). Shows live **API call stats** per provider (searches/downloads today). Daily log rotation with **45-day retention**.
 
 ### ⚙️ Settings
 Full configuration UI with live save:
 
-- **AI Backends** — multiple translation backends with priority ordering (DeepSeek, Ollama, OpenAI-compatible)
-- **Subtitle Providers** — toggle and configure SubDL (with PRO mode), Addic7ed, Podnapisi, Subscene, OpenSubtitles (.org VIP 1,000/day or .com API packages), Embedded
+- **AI Backends** — multiple translation backends with priority ordering (OpenRouter, DeepSeek, Ollama, OpenAI-compatible)
+- **Subtitle Providers** — toggle and configure SubDL (with PRO mode), Addic7ed, Podnapisi, Subscene, OpenSubtitles (.org VIP 1,000/day or [.com](http://opensubtitles.com) API packages), Embedded
 - **Cost Estimation** — per-token input/output pricing with peak hour multipliers and per-model overrides
 - **🔒 Security** — optional API key for write protection (disabled by default)
+- **💾 DB Backups** — automatic scan-start backup + manual Backup Now; import/export/restore with safety snapshots
+- **✅ Save Validation** — red outlines + clickable error summary (e.g. missing VIP credentials) prevents saving broken config
 - **Show Identification** — AniList toggle, TMDB API key, preferred source selector
 - **Library Settings** — scan paths, concurrency, sync threshold, auto-scan interval
-- **Subtitle Sync** — engine selection, default offset
+- **SMB/CIFS Library Mounts** — configure and test shares with password-guarded save (never wipes credentials on edit)
 
 ## 🌍 Subtitle Providers
 
@@ -114,20 +123,20 @@ Providers are searched in priority order. **OpenSubtitles is a fallback** — on
 | 📺 **Addic7ed** | Web scraping | Cookies | Fair use | No |
 | 🌍 **Podnapisi** | Web scraping | None | Fair use | No |
 | 🎬 **Subscene** | Web scraping | None | Fair use | No |
-| 🌐 **OpenSubtitles** | REST API | .org user/pass or .com API key | 5/day free, 1,000/day .org VIP, configurable .com | **Yes** |
+| 🌐 **OpenSubtitles** | REST API | .org user/pass or .com API key | 20/day Lite, 40/day Developer, 1,000/day .org VIP, configurable .com | **Yes** |
 
 ### 🔑 OpenSubtitles Setup
 
-OpenSubtitles supports two auth methods — use **one or both**:
+OpenSubtitles supports two auth methods — use **one or both**. Each mode has its **own API key** so switching never clears the other mode's credentials:
 
 #### opensubtitles.org VIP (1,000 downloads/day)
 If you have a VIP subscription at [opensubtitles.org](https://www.opensubtitles.org):
 1. Create a **free API consumer key** at [opensubtitles.com/consumers](https://www.opensubtitles.com/en/consumers) (takes 10 seconds)
-2. In Subber Settings → OpenSubtitles → `.org VIP Auth` section, enter your:
+2. In Subber Settings → OpenSubtitles, set Mode to **VIP — .org auth (1,000/day)**:
+   - **VIP API Key** — paste your consumer key in the dedicated VIP key field
    - **Username** — your opensubtitles.org username
    - **Password** — your opensubtitles.org password
-3. In the `.com API Consumer Key` section, paste your API consumer key
-4. Set Tier to `VIP — .org auth (1,000/day)`
+3. The VIP key is **separate from** the `.com` API key — switching modes never blanks the other.
 
 > **Why the API key?** The `.org` and `.com` share the same REST API. The consumer key authorizes API access; your username+password authenticates your VIP account.
 
@@ -141,19 +150,22 @@ If you purchased an API package at [opensubtitles.com](https://www.opensubtitles
 
 ## 🤖 LLM Backends
 
-Subber uses a multi-backend translator with automatic fallback:
+Subber uses a multi-backend translator with automatic fallback. **Recommended setup:**
 
 ```yaml
 backends:
-  - name: DeepSeek V4 Flash
+  - name: OpenRouter Llama 3.1 8B
+    api_base: https://openrouter.ai/api/v1
+    model: meta-llama/llama-3.1-8b-instruct
+  - name: DeepSeek V4 Flash (fallback)
     api_base: https://api.deepseek.com/v1
     model: deepseek-v4-flash
-  - name: Ollama (fallback)
+  - name: Ollama (local)
     api_base: http://localhost:11434/v1
     model: llama3.2:3b
 ```
 
-Works with any OpenAI-compatible API — cloud or local.
+OpenRouter Llama 3.1 8B costs ~$1 to translate **hundreds** of episodes — far cheaper than DeepSeek and better at subtitle-format adherence. Works with any OpenAI-compatible API — cloud or local.
 
 ## 📺 Show Identification
 
@@ -252,7 +264,8 @@ docker compose up -d --build
 - Library mount: `/mnt/test_library` → your media directory
 - Host networking mode (required for provider API access)
 - Auto-cleanup: temporary files removed after 24 hours
-- Logs: rotating 5MB files at `/app/data/subber.log`
+- Logs: daily rotation with 45-day retention at `/app/data/subber.log`
+- Full-history log export + redacted diagnostics bundle via Logs tab
 - Provider stats: daily API call counts at `/app/data/provider_stats.json`
 - Reports: Markdown reports at `/app/data/reports/`
 
