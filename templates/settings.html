@@ -211,6 +211,12 @@
         <div id="os-vip-panel" style="display: none; background: var(--bg-secondary, #1a1a2e); border: 1px solid var(--border); border-radius: 8px; padding: 0.8rem 1rem; margin-bottom: 0.8rem;">
             <h5 style="margin: 0 0 0.5rem 0; color: var(--accent);">opensubtitles.org — VIP Auth</h5>
             <div class="form-group" style="margin-top: 0.3rem;">
+                <label for="opensubtitles-vip-api-key">API Key (VIP consumer)</label>
+                <input type="text" id="opensubtitles-vip-api-key" name="providers.opensubtitles.vip_api_key"
+                       placeholder="API key used with your VIP login">
+                <div class="hint">The REST API requires an Api-Key header even for VIP users. Create a consumer key at <a href="https://www.opensubtitles.com/en/consumers" target="_blank" style="color: var(--accent);">opensubtitles.com/consumers</a> — this box is stored separately and never touches the .com API key below.</div>
+            </div>
+            <div class="form-group">
                 <label for="opensubtitles-username">Username</label>
                 <input type="text" id="opensubtitles-username" name="providers.opensubtitles.username"
                        placeholder="Your opensubtitles.org username">
@@ -411,10 +417,12 @@ async function loadSettings() {
         const osTier = osCfg.tier || 'free';
         document.getElementById('opensubtitles-tier').value = osTier;
         document.getElementById('opensubtitles-api-key').value = osCfg.api_key || '';
+        document.getElementById('opensubtitles-vip-api-key').value = osCfg.vip_api_key || '';
         document.getElementById('opensubtitles-username').value = osCfg.username || '';
         document.getElementById('opensubtitles-password').value = osCfg.password || '';
-        // VIP wins when username is populated (matches provider behavior).
-        const osMode = (osCfg.username) ? 'vip' : 'com';
+        // VIP mode when tier says vip; also treat populated username as VIP
+        // (matches provider behavior) for configs saved before the toggle.
+        const osMode = (osTier === 'vip' || osCfg.username) ? 'vip' : 'com';
         document.querySelector(`input[name="os-mode"][value="${osMode}"]`).checked = true;
         setOsMode(osMode);
         loadOpenSubtitlesUsage();
@@ -525,26 +533,27 @@ function setOsMode(mode) {
     }
 }
 
-// Build the opensubtitles config payload for the ACTIVE mode only.
-// VIP mode: username/password kept, api_key blanked, tier forced to 'vip'
-//           (the provider maps vip → hardcoded 1,000/day cap).
-// COM mode: api_key/tier kept, username/password blanked.
+// Build the opensubtitles config payload for the ACTIVE mode.
+// VIP mode: tier='vip' (provider maps vip → hardcoded 1,000/day cap), uses
+//           vip_api_key + username/password. The .com api_key is passed
+//           through UNTOUCHED (masked values are restored server-side).
+// COM mode: tier/api_key from the form; VIP fields passed through untouched.
+// Neither mode blanks the other's credentials — the backend picks which
+// key to use based on tier, so switching is interference-free.
 function buildOsPayload() {
     const mode = document.querySelector('input[name="os-mode"]:checked')?.value || 'com';
-    if (mode === 'vip') {
-        return {
-            tier: 'vip',
-            username: document.getElementById('opensubtitles-username').value,
-            password: document.getElementById('opensubtitles-password').value,
-            api_key: '',
-        };
-    }
-    return {
-        tier: document.getElementById('opensubtitles-tier').value,
+    const base = {
+        vip_api_key: document.getElementById('opensubtitles-vip-api-key').value,
+        username: document.getElementById('opensubtitles-username').value,
+        password: document.getElementById('opensubtitles-password').value,
         api_key: document.getElementById('opensubtitles-api-key').value,
-        username: '',
-        password: '',
     };
+    if (mode === 'vip') {
+        base.tier = 'vip';
+    } else {
+        base.tier = document.getElementById('opensubtitles-tier').value;
+    }
+    return base;
 }
 
 async function saveSettings() {

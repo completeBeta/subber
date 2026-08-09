@@ -260,7 +260,7 @@ async def api_get_config():
         for p in provs.values():
             if not isinstance(p, dict):
                 continue
-            for field in ("api_key", "username", "password"):
+            for field in ("api_key", "vip_api_key", "username", "password"):
                 if p.get(field):
                     p[field] = _mask(str(p[field]))
             cookies = p.get("cookies")

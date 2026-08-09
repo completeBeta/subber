@@ -348,7 +348,9 @@ async def _process_file(record: dict, scan_id: int, drift_threshold_ms: int) -> 
         return {"success": True, "action": "skipped", "cost": 0}
 
     # Mark as in progress
-    library_db.update_file_status(file_id, status="in_progress")
+    # Clear any stale error message from a previous attempt before we start
+    # (recovered files were keeping old 429/500 errors even after succeeding).
+    library_db.update_file_status(file_id, status="in_progress", error_message="")
 
     # Detect subtitle status
     sub_status, sub_langs = await _detect_subtitle_status(file_path)

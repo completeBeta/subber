@@ -40,6 +40,7 @@ DEFAULTS = {
         },
         "opensubtitles": {
             "api_key": "",
+            "vip_api_key": "",
             "username": "",
             "password": "",
             "tier": "free",
@@ -255,11 +256,17 @@ def build_provider_registry() -> "ProviderRegistry":
 
     if "opensubtitles" in enabled:
         os_cfg = ps.get("opensubtitles", {})
+        tier = os_cfg.get("tier", "free")
+        # VIP mode uses its OWN api key box (vip_api_key) + username/password
+        # login. The REST API still requires the Api-Key header for VIP users —
+        # the token only raises the download limit to 1,000/day. .com mode uses
+        # the regular api_key. The two never share or overwrite each other.
+        api_key = os_cfg.get("vip_api_key", "") if tier == "vip" else os_cfg.get("api_key", "")
         registry.add(OpenSubtitlesProvider(
-            api_key=os_cfg.get("api_key", ""),
+            api_key=api_key,
             username=os_cfg.get("username", ""),
             password=os_cfg.get("password", ""),
-            tier=os_cfg.get("tier", "free"),
+            tier=tier,
             daily_limit=int(os_cfg.get("daily_limit", 0) or 0),
         ))
 
