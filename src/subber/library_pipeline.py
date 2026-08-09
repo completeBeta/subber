@@ -102,9 +102,11 @@ def _mount_shares(mounts: list[dict]) -> dict[str, str]:
                 capture_output=True, text=True, check=True, timeout=15,
             )
         except subprocess.CalledProcessError as e:
-            errors[name] = e.stderr.strip() or str(e)
+            # NEVER include str(e) — it contains the full command with
+            # the password in plaintext.  Only return stderr output.
+            errors[name] = e.stderr.strip() or f"mount failed (exit {e.returncode})"
         except Exception as e:
-            errors[name] = str(e)
+            errors[name] = "mount failed"
     return errors
 
 
