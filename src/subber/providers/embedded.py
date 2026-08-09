@@ -2,11 +2,20 @@
 
 import asyncio
 import json
+import os
 import subprocess
 from pathlib import Path
 
 from ..types import SubtitleResult
 from .base import ProviderCapabilities, SubtitleProvider
+
+# ffmpeg extraction demuxes the ENTIRE video to copy one subtitle stream —
+# on a 3GB file over CIFS that's ~50s alone and far longer under concurrent
+# load (a 300s cap caused spurious timeouts). Cap concurrency so N extractions
+# never pile up, and give each one room to finish.
+_EXTRACT_CONCURRENCY = int(os.environ.get("SUBBER_EXTRACT_CONCURRENCY", "2"))
+_EXTRACT_TIMEOUT = int(os.environ.get("SUBBER_EXTRACT_TIMEOUT", "900"))
+_EXTRACT_SEMAPHORE = asyncio.Semaphore(_EXTRACT_CONCURRENCY)
 
 CODEC_EXTS = {
     "subrip": "srt",
@@ -110,11 +119,12 @@ class EmbeddedProvider(SubtitleProvider):
         args.append(str(output_path))
 
         loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(
-            None, lambda: subprocess.run(
-                args, capture_output=True, text=True, timeout=300,
+        async with _EXTRACT_SEMAPHORE:
+            result = await loop.run_in_executor(
+                None, lambda: subprocess.run(
+                    args, capture_output=True, text=True, timeout=_EXTRACT_TIMEOUT,
+                )
             )
-        )
 
         if result.returncode != 0:
             # ffmpeg prints its version banner FIRST and the actual error at
