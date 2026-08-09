@@ -589,8 +589,8 @@ function pollScan() {
                 }
             } else {
                 document.getElementById('scan-progress-text').textContent =
-                    'Attempted ' + (data.files_processed || 0) + ' of ' + (data.files_total || 0) +
-                    ' files this run (' + pct + '%)';
+                    'Processing ' + (data.files_processed || 0) + ' of ' + (data.files_total || 0) +
+                    ' files (' + pct + '%)';
             }
 
             // Reload stats and files during scan for live updates

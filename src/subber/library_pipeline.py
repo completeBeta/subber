@@ -28,6 +28,47 @@ logger = logging.getLogger("subber.library")
 # Languages we consider "English" for subtitle status
 ENGLISH_LANGS = {"en", "eng", "english"}
 
+# ── Shared provider registry (memory-leak fix) ──
+# Previously every file built a brand-new provider registry via
+# build_provider_registry() — each provider owns an httpx.AsyncClient that
+# was never closed, so ~21K files × 5 providers leaked sockets/connection
+# pools/SSL contexts and RSS climbed to 2GB until the kernel OOM-killed us.
+# Build ONE registry per scan and close it when the scan ends.
+_LIBRARY_REGISTRY: ProviderRegistry | None = None
+_LIBRARY_REGISTRY_LOCK = asyncio.Lock()
+
+# ffsubsync decodes full audio tracks — running 8 syncs concurrently is the
+# main PEAK-memory driver. Cap sync concurrency independently of the overall
+# file concurrency so search stays fast but syncs are serialized to 2.
+_SYNC_CONCURRENCY = int(os.environ.get("SUBBER_SYNC_CONCURRENCY", "2"))
+_SYNC_SEMAPHORE = asyncio.Semaphore(_SYNC_CONCURRENCY)
+
+
+async def _get_library_registry() -> ProviderRegistry:
+    """Get the shared provider registry, building it lazily on first use."""
+    global _LIBRARY_REGISTRY
+    if _LIBRARY_REGISTRY is None:
+        async with _LIBRARY_REGISTRY_LOCK:
+            if _LIBRARY_REGISTRY is None:
+                _LIBRARY_REGISTRY = await asyncio.to_thread(
+                    subber_config.build_provider_registry
+                )
+    return _LIBRARY_REGISTRY
+
+
+async def _close_library_registry() -> None:
+    """Close all provider HTTP clients and drop the shared registry."""
+    global _LIBRARY_REGISTRY
+    registry = _LIBRARY_REGISTRY
+    _LIBRARY_REGISTRY = None
+    if registry is None:
+        return
+    try:
+        await registry.close()
+    except Exception as e:
+        logger.warning("Error closing provider registry: %s", e)
+
+
 # Languages we skip translation for (already English)
 SKIP_LANGS = ENGLISH_LANGS | {"", "und", "unknown"}
 
@@ -164,11 +205,11 @@ async def run_scan(
     if media_types:
         records = [r for r in records if r["media_type"] in media_types]
 
-    # Reset per-run counters: files_processed accumulates across resume runs
-    # (it's a +1 per completion attempt), which made the progress bar drift
-    # far ahead of the actual files done. Reset to 0 on every run so the bar
-    # reflects THIS run's work from 0 → files_total.
-    library_db.update_scan(scan_id, files_total=len(records), files_processed=0)
+    # files_processed is CUMULATIVE across resume runs (user preference):
+    # it counts every completion attempt, matching how the stats panel counts
+    # files. Only the total for this run is refreshed; the processed counter
+    # keeps climbing so the numbers stay in line with each other.
+    library_db.update_scan(scan_id, files_total=len(records))
 
     if dry_run:
         # In dry-run mode, just upsert records with subtitle status but don't process
@@ -208,27 +249,33 @@ async def run_scan(
     semaphore = asyncio.Semaphore(max_concurrent)
 
     # Process in bounded batches instead of building all ~21K tasks at once.
-    # Holding every coroutine + result in memory simultaneously made the scan
-    # grow to ~1.6GB RSS and get OOM-killed (container crash → "stuck" scan).
-    results: list = []
+    # Use running counters instead of accumulating a `results` list for every
+    # file — 21K result dicts (plus exception tracebacks that pin large
+    # locals) contributed to the memory climb. Close the shared provider
+    # registry in finally so its httpx clients are released at scan end.
+    processed = 0
+    failed = 0
+    total_cost = 0.0
     BATCH_SIZE = max(4, max_concurrent * 4)
-    for i in range(0, len(records), BATCH_SIZE):
-        if _is_cancelled(scan_id):
-            break
-        chunk = records[i:i + BATCH_SIZE]
-        tasks = [
-            _process_file_with_semaphore(semaphore, record, scan_id, drift_threshold_ms)
-            for record in chunk
-        ]
-        chunk_results = await asyncio.gather(*tasks, return_exceptions=True)
-        results.extend(chunk_results)
-
-    processed = sum(1 for r in results if not isinstance(r, Exception))
-    failed = sum(1 for r in results if isinstance(r, Exception))
-    total_cost = sum(
-        r.get("cost", 0) for r in results
-        if isinstance(r, dict)
-    )
+    try:
+        for i in range(0, len(records), BATCH_SIZE):
+            if _is_cancelled(scan_id):
+                break
+            chunk = records[i:i + BATCH_SIZE]
+            tasks = [
+                _process_file_with_semaphore(semaphore, record, scan_id, drift_threshold_ms)
+                for record in chunk
+            ]
+            chunk_results = await asyncio.gather(*tasks, return_exceptions=True)
+            for r in chunk_results:
+                if isinstance(r, Exception):
+                    failed += 1
+                else:
+                    processed += 1
+                    if isinstance(r, dict):
+                        total_cost += float(r.get("cost", 0) or 0.0)
+    finally:
+        await _close_library_registry()
 
     library_db.update_scan(
         scan_id,
@@ -658,16 +705,17 @@ async def _check_and_sync(
     from .syncer import async_sync_preview
 
     try:
-        preview = await async_sync_preview(video_path, sub_path)
-        drift_ms = int(abs(preview.offset_seconds) * 1000)
+        async with _SYNC_SEMAPHORE:
+            preview = await async_sync_preview(video_path, sub_path)
+            drift_ms = int(abs(preview.offset_seconds) * 1000)
 
-        if drift_ms > drift_threshold_ms:
-            # Apply sync
-            output_path = sub_path.with_suffix(".synced.srt")
-            await async_sync_apply(video_path, sub_path, output_path)
-            return "synced", drift_ms
-        else:
-            return "skipped", drift_ms
+            if drift_ms > drift_threshold_ms:
+                # Apply sync
+                output_path = sub_path.with_suffix(".synced.srt")
+                await async_sync_apply(video_path, sub_path, output_path)
+                return "synced", drift_ms
+            else:
+                return "skipped", drift_ms
     except Exception as e:
         logger.warning("Sync check failed for %s: %s", sanitize_log(video_path), e)
         return "skipped", None
@@ -746,12 +794,13 @@ async def _translate_and_sync(
             # Sync after translation
             drift_ms = None
             try:
-                preview = await async_sync_preview(video_path, output_path)
-                drift_ms = int(abs(preview.offset_seconds) * 1000)
-                if drift_ms > drift_threshold_ms:
-                    synced_path = output_path.with_suffix(".synced.srt")
-                    await async_sync_apply(video_path, output_path, synced_path)
-                    output_path = synced_path
+                async with _SYNC_SEMAPHORE:
+                    preview = await async_sync_preview(video_path, output_path)
+                    drift_ms = int(abs(preview.offset_seconds) * 1000)
+                    if drift_ms > drift_threshold_ms:
+                        synced_path = output_path.with_suffix(".synced.srt")
+                        await async_sync_apply(video_path, output_path, synced_path)
+                        output_path = synced_path
             except Exception as e:
                 print(f"[LIBRARY] Sync failed: {e}", flush=True)
 
@@ -862,9 +911,10 @@ async def _search_download_and_process(
     """
     loop = asyncio.get_running_loop()
 
-    # Build provider registry
+    # Use the shared provider registry (one per scan). Building a fresh
+    # registry per file leaked httpx clients and caused the 2GB OOM kills.
     try:
-        registry = await loop.run_in_executor(None, subber_config.build_provider_registry)
+        registry = await _get_library_registry()
     except Exception as e:
         return {"success": False, "error": f"Failed to build providers: {e}"}
 
@@ -980,12 +1030,13 @@ async def _search_download_and_process(
 
         drift_ms = None
         try:
-            preview = await async_sync_preview(video_path, output_path)
-            drift_ms = int(abs(preview.offset_seconds) * 1000)
-            if drift_ms > drift_threshold_ms:
-                synced_path = output_path.with_suffix(".synced.srt")
-                await async_sync_apply(video_path, output_path, synced_path)
-                output_path = synced_path
+            async with _SYNC_SEMAPHORE:
+                preview = await async_sync_preview(video_path, output_path)
+                drift_ms = int(abs(preview.offset_seconds) * 1000)
+                if drift_ms > drift_threshold_ms:
+                    synced_path = output_path.with_suffix(".synced.srt")
+                    await async_sync_apply(video_path, output_path, synced_path)
+                    output_path = synced_path
         except Exception:
             pass
 
