@@ -326,19 +326,35 @@ def get_all_pending() -> list[dict]:
             conn.close()
 
 
-def mark_stale_in_progress() -> int:
-    """Reset any 'in_progress' files back to 'pending' (e.g. after crash).
+def mark_stale_in_progress(minutes: int | None = None) -> int:
+    """Reset 'in_progress' files back to 'pending'.
+
+    Args:
+        minutes: if set, only reset rows whose updated_at is OLDER than this
+            many minutes (a watchdog/heartbeat use — a file legitimately
+            processing gets updated frequently, so old rows are corpses from
+            crashes, hangs, or killed containers). If None, resets ALL
+            in_progress rows (crash-recovery on resume).
 
     Returns count of reset files.
     """
     with _lock:
         conn = _connect()
         try:
-            cursor = conn.execute(
-                """UPDATE library_files
-                   SET status = 'pending', updated_at = datetime('now')
-                   WHERE status = 'in_progress'"""
-            )
+            if minutes is None:
+                cursor = conn.execute(
+                    """UPDATE library_files
+                       SET status = 'pending', updated_at = datetime('now')
+                       WHERE status = 'in_progress'"""
+                )
+            else:
+                cursor = conn.execute(
+                    """UPDATE library_files
+                       SET status = 'pending', updated_at = datetime('now')
+                       WHERE status = 'in_progress'
+                         AND updated_at < datetime('now', ?)""",
+                    (f"-{minutes} minutes",),
+                )
             conn.commit()
             return cursor.rowcount
         finally:

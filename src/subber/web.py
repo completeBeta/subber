@@ -2406,6 +2406,27 @@ async def startup():
 
     _load_grab_state()
     asyncio.create_task(_cleanup_expired())
+    asyncio.create_task(_stale_in_progress_watchdog())
+
+
+async def _stale_in_progress_watchdog() -> None:
+    """Periodically reset files stuck 'in_progress' for too long.
+
+    A file legitimately being processed gets its updated_at refreshed as it
+    moves through stages. If a row stays 'in_progress' with no update for 30+
+    minutes, the owning task is dead (OOM kill, container restart, ffmpeg
+    hang) — reset it to 'pending' so it doesn't read as frozen forever and
+    gets retried on the next resume.
+    """
+    while True:
+        await asyncio.sleep(60)
+        try:
+            from . import library_db
+            reset = library_db.mark_stale_in_progress(minutes=30)
+            if reset:
+                _log.warning("Stale-progress watchdog: reset %d hung in_progress file(s)", reset)
+        except Exception as e:
+            _log.warning("Stale-progress watchdog error: %s", e)
 
 
 def main():
