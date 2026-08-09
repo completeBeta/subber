@@ -2306,17 +2306,49 @@ async def api_library_mounts():
 
 @app.post("/api/library/mounts")
 async def api_library_mounts_save(request: Request, _=Depends(_require_write_auth)):
-    """Save SMB mount configuration."""
+    """Save SMB mount configuration.
+
+    Preserves existing passwords when the client sends a blank or masked
+    value (the UI clears masked '********' → '' on load; saving without the
+    user re-entering the password must not wipe the real credential).
+    """
     try:
         body = await request.json()
     except Exception:
         return JSONResponse(content={"error": "Invalid JSON"}, status_code=400)
-    mounts = body.get("mounts", [])
+    new_mounts = body.get("mounts", [])
     try:
-        _subber_config.update("library", {"mounts": mounts})
-        return JSONResponse(content={"status": "ok", "count": len(mounts)})
+        # Reload from disk so the guard sees the freshest state (the mount
+        # endpoint is infrequently called; a stale cache here could re-wipe
+        # a password that was just restored externally).
+        _subber_config.reload()
+        lib_cfg = _subber_config.get_section("library") or {}
+        old_mounts = {_mount_key(m): m for m in lib_cfg.get("mounts", [])
+                      if _mount_key(m)}
+        restored = 0
+        for nm in new_mounts:
+            pw = nm.get("password", "")
+            if not pw or pw == "********":
+                key = _mount_key(nm)
+                if key and key in old_mounts and old_mounts[key].get("password"):
+                    nm["password"] = old_mounts[key]["password"]
+                    restored += 1
+        if restored:
+            print(f"[CONFIG] Restored {restored} mount password(s) from existing config", flush=True)
+        _subber_config.update("library", {"mounts": new_mounts})
+        return JSONResponse(content={"status": "ok", "count": len(new_mounts)})
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+def _mount_key(m: dict) -> str | None:
+    """Stable key for mount identity — server + share uniquely identifies
+    a mount regardless of mount_point or display name."""
+    srv = (m.get("server") or "").strip()
+    shr = (m.get("share") or "").strip()
+    if srv and shr:
+        return f"{srv}//{shr}"
+    return None
 
 
 @app.post("/api/library/mounts/test")

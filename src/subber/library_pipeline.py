@@ -175,6 +175,25 @@ async def run_scan(
         for name, err in mount_errors.items():
             print(f"[LIBRARY] Mount failed for {name}: {err}", flush=True)
 
+        # If every configured, enabled mount failed, abort immediately — there
+        # is no point burning through thousands of files that will all fail
+        # with "share may be unmounted".  One clear error instead of a storm.
+        configured = [m for m in mounts if m.get("enabled", True)]
+        if configured:
+            any_alive = any(
+                m.get("mount_point") and os.path.ismount(m["mount_point"])
+                for m in configured
+            )
+            if not any_alive:
+                msg = (
+                    "All configured mounts are down — check credentials in "
+                    "Settings → Mounts"
+                )
+                for name, err in sorted(mount_errors.items()):
+                    msg += f" | {name}: {err[:100]}"
+                library_db.update_scan(scan_id, status="failed", error_message=msg)
+                return scan_id
+
     # Scan filesystem (abort callback lets pause/cancel interrupt the walk)
     loop = asyncio.get_running_loop()
     if skip_walk:
