@@ -188,13 +188,28 @@
         <hr style="border-color: var(--border); margin: 1rem 0;">
         <h4 style="margin-bottom: 0.5rem;">OpenSubtitles</h4>
         <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">
-            Two auth methods — use <strong>one</strong>. The .org VIP login gives 1,000 downloads/day.
-            The .com API consumer key works with purchased packages (configurable limit below).
+            Pick <strong>one</strong> auth method. Switching clears the other method's credentials.
+            <strong>.org VIP</strong> = fixed 1,000 downloads/day with your VIP login.
+            <strong>.com API</strong> = consumer key with a purchased package (or free/developer).
         </p>
 
-        <!-- .org VIP Auth -->
-        <div style="background: var(--bg-secondary, #1a1a2e); border: 1px solid var(--border); border-radius: 8px; padding: 0.8rem 1rem; margin-bottom: 0.8rem;">
-            <h5 style="margin: 0 0 0.5rem 0; color: var(--accent);">opensubtitles.org — VIP Auth (1,000/day)</h5>
+        <!-- Mode toggle -->
+        <div class="form-group" style="margin-bottom: 0.8rem;">
+            <div style="display: flex; gap: 1.2rem; align-items: center;">
+                <label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer;">
+                    <input type="radio" name="os-mode" value="vip" onchange="setOsMode('vip')" style="width: auto;">
+                    <strong>.org VIP</strong>&nbsp;<span style="color: var(--text-muted); font-size: 0.8rem;">(1,000/day)</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer;">
+                    <input type="radio" name="os-mode" value="com" checked onchange="setOsMode('com')" style="width: auto;">
+                    <strong>.com API</strong>&nbsp;<span style="color: var(--text-muted); font-size: 0.8rem;">(consumer key)</span>
+                </label>
+            </div>
+        </div>
+
+        <!-- .org VIP Auth panel -->
+        <div id="os-vip-panel" style="display: none; background: var(--bg-secondary, #1a1a2e); border: 1px solid var(--border); border-radius: 8px; padding: 0.8rem 1rem; margin-bottom: 0.8rem;">
+            <h5 style="margin: 0 0 0.5rem 0; color: var(--accent);">opensubtitles.org — VIP Auth</h5>
             <div class="form-group" style="margin-top: 0.3rem;">
                 <label for="opensubtitles-username">Username</label>
                 <input type="text" id="opensubtitles-username" name="providers.opensubtitles.username"
@@ -205,11 +220,11 @@
                 <input type="password" id="opensubtitles-password" name="providers.opensubtitles.password"
                        placeholder="Your opensubtitles.org password">
             </div>
-            <div class="hint">VIP members at <a href="https://www.opensubtitles.org" target="_blank" style="color: var(--accent);">opensubtitles.org</a> get 1,000 downloads/day with username+password.</div>
+            <div class="hint">VIP members at <a href="https://www.opensubtitles.org" target="_blank" style="color: var(--accent);">opensubtitles.org</a> get 1,000 downloads/day — the cap is automatic, no plan selection needed.</div>
         </div>
 
-        <!-- .com API Consumer -->
-        <div style="background: var(--bg-secondary, #1a1a2e); border: 1px solid var(--border); border-radius: 8px; padding: 0.8rem 1rem; margin-bottom: 0.8rem;">
+        <!-- .com API Consumer panel -->
+        <div id="os-com-panel" style="background: var(--bg-secondary, #1a1a2e); border: 1px solid var(--border); border-radius: 8px; padding: 0.8rem 1rem; margin-bottom: 0.8rem;">
             <h5 style="margin: 0 0 0.5rem 0; color: var(--accent);">opensubtitles.com — API Consumer Key</h5>
             <div class="form-group" style="margin-top: 0.3rem;">
                 <label for="opensubtitles-api-key">API Key</label>
@@ -390,13 +405,18 @@ async function loadSettings() {
         document.getElementById('cfg-prov-opensubtitles').checked = prov.opensubtitles !== false;
                 document.getElementById('subdl-api-key').value = prov.subdl?.api_key || '';
         document.getElementById('subdl-pro-mode').checked = (cfg.providers?.subdl?.pro_mode) || false;
-        // OpenSubtitles settings
+        // OpenSubtitles settings — detect active mode (vip = username/password,
+        // com = api key), set the toggle, and show the matching panel.
         const osCfg = prov.opensubtitles || {};
         const osTier = osCfg.tier || 'free';
         document.getElementById('opensubtitles-tier').value = osTier;
         document.getElementById('opensubtitles-api-key').value = osCfg.api_key || '';
         document.getElementById('opensubtitles-username').value = osCfg.username || '';
         document.getElementById('opensubtitles-password').value = osCfg.password || '';
+        // VIP wins when username is populated (matches provider behavior).
+        const osMode = (osCfg.username) ? 'vip' : 'com';
+        document.querySelector(`input[name="os-mode"][value="${osMode}"]`).checked = true;
+        setOsMode(osMode);
         loadOpenSubtitlesUsage();
         document.getElementById('addic7ed-cookies').value = prov.addic7ed?.cookies || '';
         // Library settings
@@ -486,6 +506,47 @@ function numOr(id, dflt) {
     var v = parseFloat(document.getElementById(id).value);
     return isNaN(v) ? dflt : v;
 }
+
+// ── OpenSubtitles mode toggle ──
+// Show the panel matching the selected auth mode. Fields on the hidden side
+// stay in the DOM (their values are handled at save time by buildOsPayload,
+// which only serializes the ACTIVE mode and blanks the other — this is what
+// makes switching "actually switch" with no stale credentials left behind).
+function setOsMode(mode) {
+    const vipPanel = document.getElementById('os-vip-panel');
+    const comPanel = document.getElementById('os-com-panel');
+    if (!vipPanel || !comPanel) return;
+    if (mode === 'vip') {
+        vipPanel.style.display = 'block';
+        comPanel.style.display = 'none';
+    } else {
+        vipPanel.style.display = 'none';
+        comPanel.style.display = 'block';
+    }
+}
+
+// Build the opensubtitles config payload for the ACTIVE mode only.
+// VIP mode: username/password kept, api_key blanked, tier forced to 'vip'
+//           (the provider maps vip → hardcoded 1,000/day cap).
+// COM mode: api_key/tier kept, username/password blanked.
+function buildOsPayload() {
+    const mode = document.querySelector('input[name="os-mode"]:checked')?.value || 'com';
+    if (mode === 'vip') {
+        return {
+            tier: 'vip',
+            username: document.getElementById('opensubtitles-username').value,
+            password: document.getElementById('opensubtitles-password').value,
+            api_key: '',
+        };
+    }
+    return {
+        tier: document.getElementById('opensubtitles-tier').value,
+        api_key: document.getElementById('opensubtitles-api-key').value,
+        username: '',
+        password: '',
+    };
+}
+
 async function saveSettings() {
     const fb = document.getElementById('save-feedback');
     fb.className = 'save-feedback';
@@ -518,12 +579,7 @@ async function saveSettings() {
                 addic7ed: { cookies: document.getElementById('addic7ed-cookies').value },
                 podnapisi: document.getElementById('cfg-prov-podnapisi').checked,
                 subscene: document.getElementById('cfg-prov-subscene').checked,
-                opensubtitles: {
-                    tier: document.getElementById('opensubtitles-tier').value,
-                    api_key: document.getElementById('opensubtitles-api-key').value,
-                    username: document.getElementById('opensubtitles-username').value,
-                    password: document.getElementById('opensubtitles-password').value,
-                },
+                opensubtitles: buildOsPayload(),
                 
             }
         },

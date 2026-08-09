@@ -58,6 +58,8 @@ class OpenSubtitlesProvider(SubtitleProvider):
         # daily_limit: explicit override takes priority, else tier-based default
         if daily_limit > 0:
             self._daily_limit = daily_limit
+        elif tier == "vip":
+            self._daily_limit = 1000   # .org VIP = 1,000/day (hardcoded, no selection)
         elif tier == "dev":
             self._daily_limit = 100    # Developer tier = 100/day (flag enabled on key)
         elif tier == "lite":
