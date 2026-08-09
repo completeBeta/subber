@@ -2342,8 +2342,9 @@ async def _init_library_db():
 
 @app.get("/logs", response_class=HTMLResponse)
 async def logs_page(request: Request):
+    api_key = (config.get().get("ui", {}) or {}).get("api_key", "")
     return HTMLResponse(
-        jinja_env.get_template("logs.html").render(),
+        jinja_env.get_template("logs.html").render(api_key=api_key),
         headers=_NO_CACHE_HEADERS,
     )
 
@@ -2400,6 +2401,143 @@ async def api_logs_download():
     )
 
 
+@app.get("/api/logs/export")
+async def api_logs_export():
+    """Export FULL log history (current + all rotated daily files) as one file.
+
+    Files are concatenated oldest → newest. TimedRotatingFileHandler names
+    rotated files subber.log.YYYY-MM-DD, so a lexicographic sort is a
+    chronological sort.
+    """
+    import io
+    buf = io.StringIO()
+
+    # TimedRotatingFileHandler names rotated files subber.log.YYYY-MM-DD,
+    # so sorting by the date suffix gives chronological order (oldest first).
+    def _rot_key(p):
+        return p.name.rsplit(".", 1)[-1]  # YYYY-MM-DD sorts lexicographically
+
+    rotated = sorted(
+        [p for p in _LOG_FILE.parent.glob(_LOG_FILE.name + ".*")
+         if not p.name.endswith((".gz", ".zip", ".tar", ".db"))],
+        key=_rot_key, reverse=True,
+    )
+    count = 0
+    for p in rotated:
+        try:
+            with open(p, "r", encoding="utf-8", errors="replace") as f:
+                buf.write(f"===== {p.name} =====\n")
+                buf.write(f.read())
+                buf.write("\n")
+            count += 1
+        except OSError:
+            continue
+    if _LOG_FILE.exists():
+        try:
+            with open(_LOG_FILE, "r", encoding="utf-8", errors="replace") as f:
+                buf.write(f"===== {_LOG_FILE.name} (current) =====\n")
+                buf.write(f.read())
+            count += 1
+        except OSError:
+            pass
+    if count == 0:
+        return JSONResponse(content={"error": "No log files found"}, status_code=404)
+    data = buf.getvalue()
+    return Response(
+        content=data,
+        media_type="text/plain",
+        headers={"Content-Disposition": "attachment; filename=subber_logs_full.txt"},
+    )
+
+
+def _redact_line(line: str) -> str:
+    """Scrub secrets from a line for the diagnostics bundle."""
+    import re as _re
+    line = _re.sub(r"(?i)(api[_-]?key|password|token|secret|authorization)[\"'\s:=]+[\"']?([A-Za-z0-9_\-\.+/=]{6,})[\"']?",
+                   r"\1=[REDACTED]", line)
+    line = _re.sub(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b", "[IP]", line)
+    line = _re.sub(r"sk-[A-Za-z0-9_\-]{10,}", "[REDACTED]", line)
+    return line
+
+
+@app.get("/api/logs/diagnostics")
+async def api_logs_diagnostics(_=Depends(_require_write_auth)):
+    """Redacted diagnostics bundle: system info, recent errors, config shape.
+
+    Secrets are masked, IPs scrubbed. Safe to paste into a bug report.
+    """
+    import platform
+    import shutil as _shutil
+    from datetime import datetime as _dt, timezone as _tz
+
+    bundle = {
+        "generated_at": _dt.now(_tz.utc).isoformat(),
+        "system": {
+            "platform": platform.platform(),
+            "python": platform.python_version(),
+            "cpu_count": os.cpu_count(),
+        },
+    }
+
+    # Memory / disk
+    try:
+        with open("/proc/self/status") as f:
+            for ln in f:
+                if ln.startswith("VmRSS:"):
+                    bundle["system"]["rss_kb"] = int(ln.split()[1])
+                    break
+    except OSError:
+        pass
+    try:
+        usage = _shutil.disk_usage("/app/data")
+        bundle["system"]["data_disk_free_mb"] = usage.free // (1024 * 1024)
+    except OSError:
+        pass
+
+    # Scan state
+    try:
+        history = library_db.get_scan_history(limit=1)
+        status = history[0] if history else None
+        bundle["last_scan"] = {k: status.get(k) for k in ("id", "status", "total_files", "processed_files", "failed_files")} if status else None
+    except Exception:
+        bundle["last_scan"] = None
+
+    # Config shape only — keys masked
+    try:
+        cfg = config.get()
+        providers = cfg.get("providers", {})
+        bundle["providers_enabled"] = {
+            name: {k: (_mask(str(v)) if k in ("api_key", "vip_api_key", "username", "password", "cookies") else v)
+                   for k, v in (p.items() if isinstance(p, dict) else [("enabled", p)])}
+            for name, p in providers.items()
+        }
+        backends = cfg.get("translation", {}).get("backends", [])
+        bundle["translation_backends"] = [
+            {"name": b.get("name"), "model": b.get("model"),
+             "api_base": b.get("api_base"), "api_key": _mask(str(b.get("api_key", "")))}
+            for b in backends
+        ]
+    except Exception as e:
+        bundle["config_error"] = str(e)
+
+    # Recent errors/warnings from the log (redacted)
+    errors = []
+    if _LOG_FILE.exists():
+        try:
+            with open(_LOG_FILE, "r", encoding="utf-8", errors="replace") as f:
+                lines = f.readlines()
+            for ln in reversed(lines):
+                if "[ERROR]" in ln or "[WARNING]" in ln:
+                    errors.append(_redact_line(ln.rstrip()))
+                    if len(errors) >= 50:
+                        break
+        except OSError:
+            pass
+    bundle["recent_errors_warnings"] = errors
+
+    return JSONResponse(content=bundle)
+
+
 @app.get("/api/logs/stats")
 async def api_logs_stats():
     """Return today's provider API call stats."""
@@ -2432,10 +2570,12 @@ async def api_logs_stats():
 
 @app.on_event("startup")
 async def startup():
-    # Set up file logging
+    # Set up file logging — daily rotation, 45-day retention.
+    # (Previously: 5MB size rotation with only 3 backups — lost history fast
+    # during busy scans and made debugging OOMs impossible.)
     _LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    fh = logging.handlers.RotatingFileHandler(
-        str(_LOG_FILE), maxBytes=5 * 1024 * 1024, backupCount=3,
+    fh = logging.handlers.TimedRotatingFileHandler(
+        str(_LOG_FILE), when="midnight", interval=1, backupCount=45,
     )
     fh.setFormatter(logging.Formatter(
         "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -2445,7 +2585,7 @@ async def startup():
     root_logger = logging.getLogger("subber")
     root_logger.addHandler(fh)
     root_logger.setLevel(logging.DEBUG)
-    _log.info("File logging started: %s", _LOG_FILE)
+    _log.info("File logging started (daily rotation, 45d retention): %s", _LOG_FILE)
 
     _load_grab_state()
     asyncio.create_task(_cleanup_expired())

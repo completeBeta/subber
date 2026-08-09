@@ -2,6 +2,17 @@
 {% block title %}Settings — Subber{% endblock %}
 {% block tab_settings_class %}active{% endblock %}
 {% block content %}
+<style>
+/* ── Settings validation ── */
+.field-error { outline: 2px solid var(--error, #e74c3c) !important; border-color: var(--error, #e74c3c) !important; }
+.field-error-label { color: var(--error, #e74c3c); font-weight: 600; }
+.validation-summary { display: none; margin: 0.8rem 0; padding: 0.8rem 1rem; background: rgba(231, 76, 60, 0.12); border: 1px solid var(--error, #e74c3c); border-radius: 8px; }
+.validation-summary.show { display: block; }
+.validation-summary h5 { margin: 0 0 0.4rem 0; color: var(--error, #e74c3c); }
+.validation-summary ul { margin: 0; padding-left: 1.2rem; font-size: 0.85rem; }
+.validation-summary li { margin-bottom: 0.25rem; cursor: pointer; }
+.validation-summary li:hover { text-decoration: underline; }
+</style>
 <section class="settings-card">
     <h2>Settings</h2>
 
@@ -188,8 +199,10 @@
         <hr style="border-color: var(--border); margin: 1rem 0;">
         <h4 style="margin-bottom: 0.5rem;">OpenSubtitles</h4>
         <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">
-            Pick <strong>one</strong> auth method. Switching clears the other method's credentials.
-            <strong>.org VIP</strong> = fixed 1,000 downloads/day with your VIP login.
+            Pick <strong>one</strong> auth method. Both methods keep their credentials
+            saved independently — switching never erases the other side.
+            <strong>.org VIP</strong> = fixed 1,000 downloads/day with your VIP login
+            (needs its own consumer API key).
             <strong>.com API</strong> = consumer key with a purchased package (or free/developer).
         </p>
 
@@ -369,6 +382,10 @@
 </div>
 
 <button class="btn-save" onclick="saveSettings()">Save Settings</button>
+<div class="validation-summary" id="validation-summary">
+    <h5>⚠ Fix these before saving:</h5>
+    <ul id="validation-errors"></ul>
+</div>
     <span class="save-feedback" id="save-feedback"></span>
 </section>
 {% endblock %}
@@ -556,9 +573,107 @@ function buildOsPayload() {
     return base;
 }
 
+// ── Submit-time validation ──
+// Masked values come back from the API as "xx****yy" — they mean "already
+// configured", so validation must accept them instead of demanding re-entry.
+function _isMasked(v) { return (v || '').includes('****'); }
+function _isSet(v) { return (v || '').trim().length > 0; }
+
+function validateSettings() {
+    const errors = [];  // [{label, id}]
+
+    // Numeric ranges: id → [min, max, label]
+    const numericRules = {
+        'cfg-drift-threshold': [0, 60000, 'Sync drift threshold (ms)'],
+        'cfg-max-concurrent': [1, 32, 'Max concurrent files'],
+        'cfg-scan-interval': [0, 8760, 'Auto-scan interval (hours)'],
+        'cfg-max-upload-mb': [1, 1048576, 'Max upload size (MB)'],
+        'cfg-min-free-disk-mb': [0, 104857600, 'Min free disk (MB)'],
+        'cfg-cost-input': [0, 10000, 'Input cost per million'],
+        'cfg-cost-output': [0, 10000, 'Output cost per million'],
+        'cfg-cost-peak-mult': [0.1, 100, 'Peak multiplier'],
+    };
+    for (const [id, [min, max, label]] of Object.entries(numericRules)) {
+        const el = document.getElementById(id);
+        if (!el) continue;
+        const n = parseFloat(el.value);
+        if (el.value.trim() !== '' && (isNaN(n) || n < min || n > max)) {
+            errors.push({label: `${label}: must be between ${min} and ${max}`, id});
+        }
+    }
+
+    // Translation backends — only validate rows the user actually filled in
+    for (const b of currentBackends) {
+        const touched = _isSet(b.api_base) || _isSet(b.model);
+        if (touched && (!_isSet(b.model) || !_isSet(b.api_base) || !_isSet(b.name))) {
+            errors.push({label: `AI Backend "${b.name || '(unnamed)'}": name, API base URL and model are all required`, id: null});
+        }
+    }
+
+    // OpenSubtitles — credentials for the ACTIVE mode only, and only when enabled
+    const osEnabled = document.getElementById('cfg-prov-opensubtitles')?.checked;
+    if (osEnabled) {
+        const mode = document.querySelector('input[name="os-mode"]:checked')?.value || 'com';
+        if (mode === 'vip') {
+            const vipKey = document.getElementById('opensubtitles-vip-api-key')?.value || '';
+            const user = document.getElementById('opensubtitles-username')?.value || '';
+            const pass = document.getElementById('opensubtitles-password')?.value || '';
+            if (!_isSet(vipKey) && !_isMasked(vipKey)) errors.push({label: 'OpenSubtitles VIP: API key (VIP consumer) is required', id: 'opensubtitles-vip-api-key'});
+            if (!_isSet(user) && !_isMasked(user)) errors.push({label: 'OpenSubtitles VIP: username is required', id: 'opensubtitles-username'});
+            if (!_isSet(pass) && !_isMasked(pass)) errors.push({label: 'OpenSubtitles VIP: password is required', id: 'opensubtitles-password'});
+        } else {
+            const apiKey = document.getElementById('opensubtitles-api-key')?.value || '';
+            if (!_isSet(apiKey) && !_isMasked(apiKey)) errors.push({label: 'OpenSubtitles .com: API key is required (or switch to VIP mode / disable the provider)', id: 'opensubtitles-api-key'});
+        }
+    }
+
+    return errors;
+}
+
+function renderValidationErrors(errors) {
+    // Clear previous highlights
+    document.querySelectorAll('.field-error').forEach(el => el.classList.remove('field-error'));
+    const box = document.getElementById('validation-summary');
+    const list = document.getElementById('validation-errors');
+    list.innerHTML = '';
+    if (!errors.length) {
+        box.classList.remove('show');
+        return;
+    }
+    for (const e of errors) {
+        const li = document.createElement('li');
+        li.textContent = e.label;
+        if (e.id) {
+            const target = document.getElementById(e.id);
+            if (target) {
+                target.classList.add('field-error');
+                li.onclick = () => { target.scrollIntoView({behavior: 'smooth', block: 'center'}); target.focus({preventScroll: true}); };
+            }
+        }
+        list.appendChild(li);
+    }
+    box.classList.add('show');
+}
+
+// Clear a field's error styling as soon as the user edits it
+document.addEventListener('input', (ev) => {
+    if (ev.target && ev.target.classList.contains('field-error')) {
+        ev.target.classList.remove('field-error');
+    }
+});
+
 async function saveSettings() {
     const fb = document.getElementById('save-feedback');
     fb.className = 'save-feedback';
+
+    const errors = validateSettings();
+    renderValidationErrors(errors);
+    if (errors.length) {
+        fb.textContent = `✗ ${errors.length} field(s) need attention — not saved`;
+        fb.className = 'save-feedback show error';
+        document.getElementById('validation-summary').scrollIntoView({behavior: 'smooth', block: 'center'});
+        return;
+    }
 
     const sections = [
         {

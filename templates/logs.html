@@ -30,6 +30,8 @@
             <button class="btn-save" onclick="loadLogs()" style="padding: 0.35rem 0.8rem;">🔄 Refresh</button>
             <button class="btn-save" onclick="clearLogsFilter()" style="padding: 0.35rem 0.8rem; background: var(--text-muted);">Clear</button>
             <a href="/api/logs/download" class="btn-save" style="padding: 0.35rem 0.8rem; background: var(--accent); text-decoration: none; display: inline-block;">⬇ Download Log</a>
+            <a href="/api/logs/export" class="btn-save" style="padding: 0.35rem 0.8rem; background: #2ecc71; text-decoration: none; display: inline-block;" title="All rotated daily files + current log in one file">⬇ Export Full History</a>
+            <button class="btn-save" onclick="downloadDiagnostics()" style="padding: 0.35rem 0.8rem; background: #9b59b6;" title="Redacted system/config/error bundle — safe to share in bug reports">🩺 Diagnostics</button>
         </div>
     </div>
 
@@ -51,6 +53,7 @@
 
 {% block scripts %}
 <script>
+const API_KEY = '{{ api_key }}';
 let autoRefreshTimer = null;
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -73,6 +76,28 @@ function clearLogsFilter() {
     document.getElementById('log-level').value = '';
     document.getElementById('log-lines').value = '200';
     loadLogs();
+}
+
+async function downloadDiagnostics() {
+    try {
+        const resp = await fetch('/api/logs/diagnostics', {
+            headers: {'X-API-Key': API_KEY},
+        });
+        if (!resp.ok) {
+            alert('Diagnostics failed: HTTP ' + resp.status);
+            return;
+        }
+        const bundle = await resp.json();
+        const blob = new Blob([JSON.stringify(bundle, null, 2)], {type: 'application/json'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'subber_diagnostics.json';
+        a.click();
+        URL.revokeObjectURL(url);
+    } catch (e) {
+        alert('Diagnostics error: ' + e.message);
+    }
 }
 
 async function loadLogs() {
