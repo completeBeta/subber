@@ -99,7 +99,7 @@ def _mount_shares(mounts: list[dict]) -> dict[str, str]:
                 ["mount", "-t", "cifs",
                  f"//{m['server']}/{m['share']}", str(mp),
                  "-o", f"username={m['username']},password={m['password']},rw,iocharset=utf8,vers=3.0"],
-                capture_output=True, text=True, check=True, timeout=15,
+                capture_output=True, text=True, check=True, timeout=30,
             )
         except subprocess.CalledProcessError as e:
             # NEVER include str(e) — it contains the full command with
