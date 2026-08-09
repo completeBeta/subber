@@ -692,6 +692,27 @@ async def _extract_embedded_sub(file_path: Path, language: str) -> tuple[Path, s
 
 # ── Sync check ──
 
+def _replace_with_synced(sub_path: Path, synced_path: Path) -> Path:
+    """Replace the pre-sync subtitle in-place with its synced version.
+
+    Media servers (Plex/Jellyfin/Plexy) treat '<name>.en.srt' and
+    '<name>.en.synced.srt' as the SAME English track, so keeping both
+    leaves the user unable to tell which is which. The synced file is the
+    final product: atomically overwrite the original and drop the
+    intermediate. Falls back to keeping both files (old behavior) if the
+    replace fails, so we never lose the synced result.
+    """
+    try:
+        os.replace(synced_path, sub_path)
+        return sub_path
+    except OSError as e:
+        logger.warning(
+            "Could not replace %s with synced version (%s) — keeping .synced file",
+            sanitize_log(sub_path), e,
+        )
+        return synced_path
+
+
 async def _check_and_sync(
     video_path: Path,
     status: str,
@@ -717,9 +738,11 @@ async def _check_and_sync(
             drift_ms = int(abs(preview.offset_seconds) * 1000)
 
             if drift_ms > drift_threshold_ms:
-                # Apply sync
-                output_path = sub_path.with_suffix(".synced.srt")
-                await async_sync_apply(video_path, sub_path, output_path)
+                # Apply sync and replace the original — never leave a parallel
+                # .synced.srt (media servers can't tell the two apart).
+                tmp_path = sub_path.with_suffix(".synced.srt")
+                await async_sync_apply(video_path, sub_path, tmp_path)
+                _replace_with_synced(sub_path, tmp_path)
                 return "synced", drift_ms
             else:
                 return "skipped", drift_ms
@@ -805,9 +828,9 @@ async def _translate_and_sync(
                     preview = await async_sync_preview(video_path, output_path)
                     drift_ms = int(abs(preview.offset_seconds) * 1000)
                     if drift_ms > drift_threshold_ms:
-                        synced_path = output_path.with_suffix(".synced.srt")
-                        await async_sync_apply(video_path, output_path, synced_path)
-                        output_path = synced_path
+                        tmp_path = output_path.with_suffix(".synced.srt")
+                        await async_sync_apply(video_path, output_path, tmp_path)
+                        output_path = _replace_with_synced(output_path, tmp_path)
             except Exception as e:
                 print(f"[LIBRARY] Sync failed: {e}", flush=True)
 
@@ -1041,9 +1064,9 @@ async def _search_download_and_process(
                 preview = await async_sync_preview(video_path, output_path)
                 drift_ms = int(abs(preview.offset_seconds) * 1000)
                 if drift_ms > drift_threshold_ms:
-                    synced_path = output_path.with_suffix(".synced.srt")
-                    await async_sync_apply(video_path, output_path, synced_path)
-                    output_path = synced_path
+                    tmp_path = output_path.with_suffix(".synced.srt")
+                    await async_sync_apply(video_path, output_path, tmp_path)
+                    output_path = _replace_with_synced(output_path, tmp_path)
         except Exception:
             pass
 
