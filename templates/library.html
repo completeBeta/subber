@@ -68,12 +68,17 @@
                 <option value="tv">TV Shows</option>
                 <option value="movie">Movies</option>
             </select>
-            <select id="status-filter" onchange="loadFiles()">
+            <select id="status-filter" onchange="onStatusFilterChange()">
                 <option value="all">All Status</option>
                 <option value="pending">Pending</option>
                 <option value="done">Done</option>
                 <option value="failed">Failed</option>
                 <option value="skipped">Skipped</option>
+                <option value="" disabled>──── Actions ────</option>
+                <option value="action:translated,downloaded_and_translated">Translated</option>
+                <option value="action:downloaded_and_translated">Grabbed</option>
+                <option value="action:synced">Synced</option>
+                <option value="action:skipped">Skipped (action)</option>
             </select>
             <input type="text" id="search-input" placeholder="Search..." oninput="debounceSearch()" style="padding: 0.3rem 0.5rem; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 4px;">
         </div>
@@ -98,12 +103,12 @@
         </div>
     </div>
 
-    <!-- Stats panel -->
+    <!-- Stats panel (clickable pills filter the table by action) -->
     <div class="library-stats-panel" id="stats-panel">
-        <div class="stat-pill">Translated: <span id="stat-translated">0</span></div>
-        <div class="stat-pill">Downloaded: <span id="stat-downloaded">0</span></div>
-        <div class="stat-pill">Synced: <span id="stat-synced">0</span></div>
-        <div class="stat-pill">Skipped: <span id="stat-skipped2">0</span></div>
+        <div class="stat-pill" id="pill-translated" onclick="filterByAction('translated,downloaded_and_translated')" style="cursor:pointer;" title="Click to filter table">Translated: <span id="stat-translated">0</span></div>
+        <div class="stat-pill" id="pill-grabbed" onclick="filterByAction('downloaded_and_translated')" style="cursor:pointer;" title="Click to filter table">Grabbed: <span id="stat-downloaded">0</span></div>
+        <div class="stat-pill" id="pill-synced" onclick="filterByAction('synced')" style="cursor:pointer;" title="Click to filter table">Synced: <span id="stat-synced">0</span></div>
+        <div class="stat-pill" id="pill-skipped" onclick="filterByAction('skipped')" style="cursor:pointer;" title="Click to filter table">Skipped: <span id="stat-skipped2">0</span></div>
         <div class="stat-pill">Last scan: <span id="stat-last-scan">Never</span></div>
     </div>
 
@@ -262,7 +267,12 @@ async function loadStats() {
         // Stats panel
         const actions = data.actions || {};
         document.getElementById('stat-translated').textContent = (actions.translated || 0) + (actions.downloaded_and_translated || 0);
-        document.getElementById('stat-downloaded').textContent = actions.downloaded || 0;
+        // "Grabbed" = files downloaded from subtitle sites. The pipeline only
+        // ever writes 'downloaded_and_translated' (a download always leads to
+        // sync/translate), never bare 'downloaded' — so wire the pill to the
+        // real value. Include bare 'downloaded' defensively in case a future
+        // provider path writes it.
+        document.getElementById('stat-downloaded').textContent = (actions.downloaded_and_translated || 0) + (actions.downloaded || 0);
         document.getElementById('stat-synced').textContent = actions.synced || 0;
         document.getElementById('stat-skipped2').textContent = actions.skipped || 0;
 
@@ -306,10 +316,40 @@ async function checkActiveScan() {
 // different signature and re-render.
 let lastFilesSignature = null;
 
+// Clickable stat-pill filter: set the status dropdown to the matching action
+// option (keeps dropdown + pills in sync) and reload.
+function filterByAction(actionValue) {
+    const sel = document.getElementById('status-filter');
+    sel.value = 'action:' + actionValue;
+    if (sel.value !== 'action:' + actionValue) {
+        // Option doesn't exist — fall back to custom via search-less state
+        sel.value = 'all';
+    }
+    currentPage = 1;
+    lastFilesSignature = null; // force re-render for the new filter
+    loadFiles();
+}
+
+// Dropdown change handler — same entry point, keeps one code path.
+function onStatusFilterChange() {
+    currentPage = 1;
+    lastFilesSignature = null; // force re-render for the new filter
+    loadFiles();
+}
+
 async function loadFiles() {
-    const status = document.getElementById('status-filter').value;
+    let status = document.getElementById('status-filter').value;
     const mediaType = document.getElementById('media-type-filter').value;
     const search = document.getElementById('search-input').value;
+
+    // The dropdown can select either a status OR an action filter
+    // (action:* prefix). Split them for the API call.
+    let action = 'all';
+    if (status.startsWith('action:')) {
+        action = status.substring('action:'.length);
+        status = 'all';
+    }
+
     // Show/hide retry banner based on filter
     const banner = document.getElementById('retry-banner');
     if (banner) {
@@ -324,6 +364,7 @@ async function loadFiles() {
             limit: pageSize,
             sort: 'updated_at',
             order: 'desc',
+            action: action,
         });
         if (search) params.set('search', search);
 

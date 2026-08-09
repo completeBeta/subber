@@ -94,10 +94,17 @@ class EmbeddedProvider(SubtitleProvider):
             "-map", f"0:s:{track_index}",
         ]
 
-        # Always copy codec, but match output extension to codec
-        # (ASS data in .srt container = ffmpeg error)
-        args.extend(["-c:s", "copy"])
-        ext = CODEC_EXTS.get(codec, "srt")
+        # Match codec handling to the actual codec:
+        # - mov_text is MP4-native and cannot be STREAM-COPIED into an .srt
+        #   container (ffmpeg rejects it) → transcode to subrip instead.
+        # - text codecs (subrip/ass/ssa/webvtt) copy cleanly when the output
+        #   extension matches the codec.
+        if codec == "mov_text":
+            args.extend(["-c:s", "subrip"])
+            ext = "srt"
+        else:
+            args.extend(["-c:s", "copy"])
+            ext = CODEC_EXTS.get(codec, "srt")
         output_path = output_path.with_suffix(f".{ext}")
 
         args.append(str(output_path))
@@ -110,8 +117,12 @@ class EmbeddedProvider(SubtitleProvider):
         )
 
         if result.returncode != 0:
+            # ffmpeg prints its version banner FIRST and the actual error at
+            # the END of stderr — capture the tail so users see the real error.
+            stderr_tail = result.stderr.strip().splitlines()
+            error_text = " ".join(stderr_tail[-6:])[-600:] if stderr_tail else "(no stderr)"
             raise RuntimeError(
-                f"ffmpeg extraction failed (track {track_index}): {result.stderr[:500]}"
+                f"ffmpeg extraction failed (track {track_index}): {error_text}"
             )
 
         return output_path

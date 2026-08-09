@@ -370,6 +370,7 @@ async def _process_file(record: dict, scan_id: int, drift_threshold_ms: int) -> 
             library_db.update_file_status(
                 file_id, status="done", action_taken=action,
                 sync_drift_ms=drift, subtitle_path=str(ext_en) if ext_en else None,
+                subtitle_languages=["en"],
             )
 
         elif sub_status == "embedded_en":
@@ -382,6 +383,7 @@ async def _process_file(record: dict, scan_id: int, drift_threshold_ms: int) -> 
                     file_id, status="done", action_taken=action,
                     sync_drift_ms=drift, subtitle_path=str(sub_path),
                     provider_used="embedded",
+                    subtitle_languages=["en"],
                 )
             else:
                 library_db.update_file_status(
@@ -401,6 +403,7 @@ async def _process_file(record: dict, scan_id: int, drift_threshold_ms: int) -> 
                     provider_used=provider_result.get("provider"),
                     sync_drift_ms=provider_result.get("drift_ms"),
                     translation_cost=cost,
+                    subtitle_languages=["en"],
                 )
             else:
                 # Provider search failed — translate existing foreign sub
@@ -414,6 +417,7 @@ async def _process_file(record: dict, scan_id: int, drift_threshold_ms: int) -> 
                         model_used=result["model_used"],
                         sync_drift_ms=result.get("drift_ms"),
                         translation_cost=cost,
+                        subtitle_languages=["en"],
                     )
                 else:
                     library_db.update_file_status(
@@ -433,6 +437,7 @@ async def _process_file(record: dict, scan_id: int, drift_threshold_ms: int) -> 
                     provider_used=provider_result.get("provider"),
                     sync_drift_ms=provider_result.get("drift_ms"),
                     translation_cost=cost,
+                    subtitle_languages=["en"],
                 )
             else:
                 # Provider search failed — extract embedded foreign and translate
@@ -451,6 +456,7 @@ async def _process_file(record: dict, scan_id: int, drift_threshold_ms: int) -> 
                         provider_used="embedded",
                         sync_drift_ms=result.get("drift_ms"),
                         translation_cost=cost,
+                        subtitle_languages=["en"],
                     )
                 else:
                     library_db.update_file_status(
@@ -470,6 +476,7 @@ async def _process_file(record: dict, scan_id: int, drift_threshold_ms: int) -> 
                 sync_drift_ms=result.get("drift_ms"),
                 translation_cost=cost,
                 error_message=result.get("error"),
+                subtitle_languages=["en"] if result.get("success") else None,
             )
         else:
             library_db.update_file_status(

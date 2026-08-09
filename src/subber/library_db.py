@@ -185,8 +185,14 @@ def update_file_status(
     sync_drift_ms: int | None = None,
     translation_cost: float | None = None,
     error_message: str | None = None,
+    subtitle_languages: list | None = None,
 ) -> None:
-    """Update a file's processing status and results."""
+    """Update a file's processing status and results.
+
+    subtitle_languages: final subtitle language list once known (e.g. ["en"]).
+    Detection runs BEFORE download (often '[]' for no-subs files), so the
+    final language is written here when the subtitle actually lands.
+    """
     updates = ["status = ?", "updated_at = datetime('now')"]
     params: list[Any] = [status]
 
@@ -211,6 +217,10 @@ def update_file_status(
     if error_message is not None:
         updates.append("error_message = ?")
         params.append(error_message)
+    if subtitle_languages is not None:
+        import json as _json
+        updates.append("subtitle_languages = ?")
+        params.append(_json.dumps(subtitle_languages))
 
     params.append(file_id)
     set_clause = ", ".join(updates)
@@ -234,6 +244,7 @@ def query_files(
     sort: str = "updated_at",
     order: str = "desc",
     search: str | None = None,
+    action: str | None = None,
 ) -> dict:
     """Query library files with filtering, sorting, and pagination.
 
@@ -257,6 +268,17 @@ def query_files(
     if media_type and media_type != "all":
         where_clauses.append("media_type = ?")
         params.append(media_type)
+    if action and action != "all":
+        # Accept comma-separated values so UI pills can map one click to
+        # multiple action_taken values (e.g. Translated -> translated +
+        # downloaded_and_translated).
+        action_list = [a.strip() for a in action.split(",") if a.strip()]
+        if len(action_list) == 1:
+            where_clauses.append("action_taken = ?")
+            params.append(action_list[0])
+        elif action_list:
+            where_clauses.append(f"action_taken IN ({','.join('?' * len(action_list))})")
+            params.extend(action_list)
     if search:
         where_clauses.append("(show_title LIKE ? OR movie_title LIKE ? OR file_path LIKE ?)")
         params.extend([f"%{search}%"] * 3)

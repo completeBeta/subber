@@ -2032,6 +2032,7 @@ async def api_library_files(
     sort: str = "updated_at",
     order: str = "desc",
     search: str = "",
+    action: str = "all",
 ):
     """Query library files with filtering, sorting, and pagination."""
     _libdb.init_db()
@@ -2043,6 +2044,7 @@ async def api_library_files(
         sort=sort,
         order=order,
         search=search if search else None,
+        action=action if action else None,
     )
     return JSONResponse(content=result)
 
