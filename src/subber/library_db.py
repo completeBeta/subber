@@ -1,6 +1,7 @@
 """SQLite database for the Library tab — schema, migrations, and CRUD operations."""
 
 import json
+import re
 import sqlite3
 import threading
 from datetime import datetime
@@ -9,6 +10,7 @@ from typing import Any
 
 
 DB_PATH = Path("/app/data/library.db")
+BACKUP_DIR = Path("/app/data/backups")
 _lock = threading.Lock()
 
 
@@ -728,3 +730,173 @@ def _short_path(path: str, max_len: int = 60) -> str:
     if len(path) <= max_len:
         return path
     return "…" + path[-(max_len - 1):]
+
+
+# ═══════════════════════════════════════════════
+# Database backups — create, list, restore, rotate
+# ═══════════════════════════════════════════════
+
+# Keep the N most recent auto/manual backups; the newest pre_restore snapshot
+# (taken automatically before every restore) is kept separately so a bad
+# restore can always be undone.
+BACKUP_KEEP = 5
+_BACKUP_NAME_RE = re.compile(
+    r"^library_(\d{8}_\d{6})_(auto|manual|pre_restore|imported)\.db$"
+)
+
+
+def create_backup(kind: str = "manual") -> dict:
+    """Snapshot the live DB using SQLite's online backup API (safe while a
+    scan is writing — WAL-consistent, no file copy races).
+
+    kind: 'auto' (scan start), 'manual' (user), 'pre_restore' (safety net).
+    Returns {"name", "path", "size"} and rotates old backups.
+    """
+    if kind not in ("auto", "manual", "pre_restore", "imported"):
+        kind = "manual"
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    dest = BACKUP_DIR / f"library_{ts}_{kind}.db"
+
+    src = sqlite3.connect(str(DB_PATH), timeout=30)
+    try:
+        dst = sqlite3.connect(str(dest), timeout=30)
+        try:
+            with _lock:
+                src.backup(dst)
+        finally:
+            dst.close()
+    finally:
+        src.close()
+
+    _rotate_backups()
+    return {"name": dest.name, "path": str(dest), "size": dest.stat().st_size}
+
+
+def _rotate_backups() -> None:
+    """Keep the newest BACKUP_KEEP auto/manual backups (by age) and the newest
+    pre_restore snapshot. Delete the rest."""
+    try:
+        backups = _scan_backup_dir()
+    except OSError:
+        return
+
+    regular = sorted(
+        (b for b in backups if b["kind"] in ("auto", "manual")),
+        key=lambda b: b["created"], reverse=True,
+    )
+    pre_restore = sorted(
+        (b for b in backups if b["kind"] == "pre_restore"),
+        key=lambda b: b["created"], reverse=True,
+    )
+    doomed = regular[BACKUP_KEEP:] + pre_restore[1:]
+    for b in doomed:
+        try:
+            Path(b["path"]).unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _scan_backup_dir() -> list[dict]:
+    """Enumerate valid backup files with metadata."""
+    if not BACKUP_DIR.exists():
+        return []
+    out = []
+    for p in BACKUP_DIR.iterdir():
+        m = _BACKUP_NAME_RE.match(p.name)
+        if not m or not p.is_file():
+            continue
+        try:
+            st = p.stat()
+        except OSError:
+            continue
+        # Row count gives the user a sense of what each backup contains
+        rows = None
+        try:
+            conn = sqlite3.connect(str(p), timeout=5)
+            try:
+                rows = conn.execute(
+                    "SELECT COUNT(*) FROM library_files"
+                ).fetchone()[0]
+            finally:
+                conn.close()
+        except Exception:
+            pass
+        out.append({
+            "name": p.name,
+            "kind": m.group(2),
+            "created": m.group(1),
+            "created_display": (
+                f"{m.group(1)[0:4]}-{m.group(1)[4:6]}-{m.group(1)[6:8]} "
+                f"{m.group(1)[9:11]}:{m.group(1)[11:13]}:{m.group(1)[13:15]}"
+            ),
+            "size": st.st_size,
+            "file_count": rows,
+            "path": str(p),
+        })
+    out.sort(key=lambda b: b["created"], reverse=True)
+    return out
+
+
+def list_backups() -> list[dict]:
+    return _scan_backup_dir()
+
+
+def validate_backup_file(path: Path) -> tuple[bool, str]:
+    """Check that a file is a SQLite DB containing our library_files table."""
+    try:
+        conn = sqlite3.connect(str(path), timeout=10)
+        try:
+            tables = {r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()}
+            if "library_files" not in tables:
+                return False, "Not a Subber library DB (missing library_files table)"
+            # Integrity check catches truncated/corrupt uploads before restore
+            ok = conn.execute("PRAGMA integrity_check").fetchone()[0]
+            if ok != "ok":
+                return False, f"Backup failed integrity check: {ok}"
+            return True, "ok"
+        finally:
+            conn.close()
+    except sqlite3.DatabaseError as e:
+        return False, f"Not a valid SQLite database: {e}"
+    except OSError as e:
+        return False, str(e)
+
+
+def restore_backup(name: str) -> dict:
+    """Restore a backup over the live DB.
+
+    Safety: 1) snapshot the CURRENT db first (pre_restore), 2) validate the
+    backup, 3) restore via the online backup API (atomic, no file juggling).
+    """
+    src_path = BACKUP_DIR / name
+    if not src_path.is_file() or not _BACKUP_NAME_RE.match(name):
+        raise ValueError(f"Unknown backup: {name}")
+
+    ok, msg = validate_backup_file(src_path)
+    if not ok:
+        raise ValueError(msg)
+
+    # Safety net — never a point of no return
+    snapshot = create_backup(kind="pre_restore")
+
+    src = sqlite3.connect(str(src_path), timeout=30)
+    try:
+        dst = sqlite3.connect(str(DB_PATH), timeout=30)
+        try:
+            with _lock:
+                src.backup(dst)
+        finally:
+            dst.close()
+    finally:
+        src.close()
+
+    conn = sqlite3.connect(str(DB_PATH), timeout=30)
+    try:
+        rows = conn.execute("SELECT COUNT(*) FROM library_files").fetchone()[0]
+    finally:
+        conn.close()
+
+    return {"restored": name, "safety_snapshot": snapshot["name"], "file_count": rows}

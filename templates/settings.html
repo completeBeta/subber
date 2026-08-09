@@ -340,6 +340,26 @@
         </div>
     </div>
 
+    <!-- Database Backups -->
+    <div class="settings-section">
+        <h3>💾 Database Backups</h3>
+        <p class="hint" style="color: var(--text-muted); margin-bottom: 0.8rem;">
+            An automatic backup runs before every scan. The newest <strong>5</strong> auto/manual
+            backups are kept — older ones rotate out by age. Restoring always takes a
+            safety snapshot of the current database first, so a bad restore can be undone.
+        </p>
+        <div style="display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.8rem;">
+            <button class="btn-save" onclick="createBackup()" id="btn-backup-now" style="padding: 0.4rem 0.9rem;">💾 Backup Now</button>
+            <label class="btn-save" style="padding: 0.4rem 0.9rem; background: #9b59b6; cursor: pointer;">
+                ⬆ Import DB
+                <input type="file" id="db-import-file" accept=".db,.sqlite,.sqlite3" style="display: none;" onchange="importBackup(this)">
+            </label>
+            <button class="btn-save" onclick="loadBackups()" style="padding: 0.4rem 0.9rem; background: var(--text-muted);">🔄 Refresh</button>
+            <span id="backup-feedback" style="font-size: 0.85rem;"></span>
+        </div>
+        <div id="backup-list" style="font-size: 0.85rem;"></div>
+    </div>
+
     <div class="settings-section">
         <h3>📺 Show Identification</h3>
         <p class="hint" style="color: var(--text-muted); margin-bottom: 0.8rem;">
@@ -889,6 +909,124 @@ async function loadOpenSubtitlesUsage() {
 }
 
 
+// ── Database backups ──
+function _bkFeedback(msg, isError) {
+    const fb = document.getElementById('backup-feedback');
+    fb.textContent = msg;
+    fb.style.color = isError ? 'var(--error, #e74c3c)' : '#2ecc71';
+    clearTimeout(window._bkFbTimer);
+    window._bkFbTimer = setTimeout(() => { fb.textContent = ''; }, 5000);
+}
+
+function _fmtSize(b) {
+    if (b == null) return '?';
+    if (b > 1024 * 1024) return (b / 1024 / 1024).toFixed(1) + ' MB';
+    if (b > 1024) return (b / 1024).toFixed(1) + ' KB';
+    return b + ' B';
+}
+
+const _BK_KIND_LABEL = {auto: 'auto', manual: 'manual', pre_restore: 'pre-restore', imported: 'imported'};
+
+async function loadBackups() {
+    const box = document.getElementById('backup-list');
+    try {
+        const resp = await fetch('/api/library/backups');
+        const data = await resp.json();
+        const backups = data.backups || [];
+        if (!backups.length) {
+            box.innerHTML = '<em style="color: var(--text-muted);">No backups yet — click “Backup Now” or start a scan.</em>';
+            return;
+        }
+        box.innerHTML = backups.map(b => `
+            <div style="display: flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--border); flex-wrap: wrap;">
+                <strong>${b.created_display}</strong>
+                <span style="background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 0.05rem 0.5rem; font-size: 0.75rem;">${_BK_KIND_LABEL[b.kind] || b.kind}</span>
+                <span style="color: var(--text-muted);">${_fmtSize(b.size)}${b.file_count != null ? ' · ' + b.file_count.toLocaleString() + ' files' : ''}</span>
+                <span style="margin-left: auto; display: flex; gap: 0.35rem;">
+                    <a href="/api/library/backups/download?name=${encodeURIComponent(b.name)}" class="btn-save" style="padding: 0.15rem 0.5rem; font-size: 0.75rem; text-decoration: none;">⬇</a>
+                    <button class="btn-save" style="padding: 0.15rem 0.5rem; font-size: 0.75rem; background: #2ecc71;" onclick="restoreBackup('${b.name}')">Restore</button>
+                    <button class="btn-save" style="padding: 0.15rem 0.5rem; font-size: 0.75rem; background: var(--error);" onclick="deleteBackup('${b.name}')">✕</button>
+                </span>
+            </div>`).join('');
+    } catch (e) {
+        box.innerHTML = '<em style="color: var(--error);">Failed to load backups: ' + e.message + '</em>';
+    }
+}
+
+async function createBackup() {
+    const btn = document.getElementById('btn-backup-now');
+    btn.disabled = true; btn.textContent = 'Backing up…';
+    try {
+        const resp = await fetch('/api/library/backups', {
+            method: 'POST', headers: {'X-API-Key': API_KEY},
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || 'HTTP ' + resp.status);
+        _bkFeedback('✓ Backup created: ' + data.name, false);
+        await loadBackups();
+    } catch (e) {
+        _bkFeedback('✗ ' + e.message, true);
+    } finally {
+        btn.disabled = false; btn.textContent = '💾 Backup Now';
+    }
+}
+
+async function restoreBackup(name) {
+    if (!confirm('Restore this backup over the CURRENT database?\n\nA safety snapshot of the current DB is taken first, so this can be undone.')) return;
+    _bkFeedback('Restoring…', false);
+    try {
+        const resp = await fetch('/api/library/backups/restore', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-API-Key': API_KEY},
+            body: JSON.stringify({name}),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || 'HTTP ' + resp.status);
+        _bkFeedback(`✓ Restored (${data.file_count.toLocaleString()} files). Safety snapshot: ${data.safety_snapshot}`, false);
+        await loadBackups();
+    } catch (e) {
+        _bkFeedback('✗ Restore failed: ' + e.message, true);
+    }
+}
+
+async function importBackup(input) {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    if (!confirm(`Import "${file.name}" over the CURRENT database?\n\nA safety snapshot of the current DB is taken first.`)) { input.value = ''; return; }
+    _bkFeedback('Importing…', false);
+    try {
+        const fd = new FormData();
+        fd.append('file', file);
+        const resp = await fetch('/api/library/backups/import', {
+            method: 'POST', headers: {'X-API-Key': API_KEY}, body: fd,
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || 'HTTP ' + resp.status);
+        _bkFeedback(`✓ Imported (${data.file_count.toLocaleString()} files). Safety snapshot: ${data.safety_snapshot}`, false);
+        await loadBackups();
+    } catch (e) {
+        _bkFeedback('✗ Import failed: ' + e.message, true);
+    } finally {
+        input.value = '';
+    }
+}
+
+async function deleteBackup(name) {
+    if (!confirm('Delete backup ' + name + '?')) return;
+    try {
+        const resp = await fetch('/api/library/backups/' + encodeURIComponent(name), {
+            method: 'DELETE', headers: {'X-API-Key': API_KEY},
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || 'HTTP ' + resp.status);
+        _bkFeedback('✓ Deleted', false);
+        await loadBackups();
+    } catch (e) {
+        _bkFeedback('✗ ' + e.message, true);
+    }
+}
+
 loadSettings();
+loadBackups();
 </script>
 {% endblock %}

@@ -1864,6 +1864,14 @@ async def api_library_scan(request: Request, _=Depends(_require_write_auth)):
     # Initialize DB
     _libdb.init_db()
 
+    # Auto-backup before every scan (best effort — a failed backup must never
+    # block scanning). Rotation keeps the newest 5 auto/manual backups.
+    try:
+        bk = _libdb.create_backup(kind="auto")
+        print(f"[LIBRARY] Auto-backup before scan {scan_type}: {bk['name']} ({bk['size']} bytes)", flush=True)
+    except Exception as e:
+        print(f"[LIBRARY] Auto-backup failed (scan continues): {e}", flush=True)
+
     # Create scan record
     scan_id = _libdb.create_scan(scan_type)
     _lib_active_scans[scan_id] = {"status": "running", "files_total": 0, "files_processed": 0}
@@ -2124,6 +2132,145 @@ async def api_library_reset(_=Depends(_require_write_auth),):
         finally:
             conn.close()
     except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+# ═══════════════════════════════════════════════
+# Library DB backups — list, create, restore, import, download
+# ═══════════════════════════════════════════════
+
+@app.get("/api/library/backups")
+async def api_library_backups():
+    """List all DB backups (auto + manual + pre_restore snapshots)."""
+    try:
+        return JSONResponse(content={"backups": _libdb.list_backups(),
+                                     "keep": _libdb.BACKUP_KEEP})
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+@app.post("/api/library/backups")
+async def api_library_backup_create(_=Depends(_require_write_auth)):
+    """Create a manual backup of the library DB."""
+    try:
+        info = _libdb.create_backup(kind="manual")
+        return JSONResponse(content={"status": "ok", **info})
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+@app.post("/api/library/backups/restore")
+async def api_library_backup_restore(request: Request, _=Depends(_require_write_auth)):
+    """Restore a named backup over the live DB.
+
+    Safety: a pre_restore snapshot of the CURRENT db is taken first, so this
+    can always be undone by restoring that snapshot.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    name = body.get("name", "")
+    if not name:
+        return JSONResponse(content={"error": "Missing backup name"}, status_code=400)
+    try:
+        result = _libdb.restore_backup(name)
+        return JSONResponse(content={"status": "ok", **result})
+    except ValueError as e:
+        return JSONResponse(content={"error": str(e)}, status_code=400)
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+@app.get("/api/library/backups/download")
+async def api_library_backup_download(name: str = ""):
+    """Download a backup file by name (validated against the backup pattern)."""
+    import re as _re
+    if not name or not _libdb._BACKUP_NAME_RE.match(name):
+        return JSONResponse(content={"error": "Invalid backup name"}, status_code=400)
+    path = _libdb.BACKUP_DIR / name
+    if not path.is_file():
+        return JSONResponse(content={"error": "Backup not found"}, status_code=404)
+    return FileResponse(path=str(path), filename=name,
+                        media_type="application/octet-stream")
+
+
+@app.post("/api/library/backups/import")
+async def api_library_backup_import(file: UploadFile, _=Depends(_require_write_auth)):
+    """Import an external Subber DB file: validate, snapshot current, replace.
+
+    Accepts any valid library DB (not just our backup naming) so users can
+    bring a db copied from another install. Same safety net as restore:
+    a pre_restore snapshot is taken before the import takes effect.
+    """
+    if not file.filename or not file.filename.lower().endswith((".db", ".sqlite", ".sqlite3")):
+        return JSONResponse(
+            content={"error": "Upload must be a .db / .sqlite file"}, status_code=400)
+
+    _libdb.BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    from datetime import datetime as _dt
+    ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+    staged = _libdb.BACKUP_DIR / f"_staged_{ts}.db"
+    try:
+        content = await file.read()
+        if len(content) < 100:
+            return JSONResponse(content={"error": "File too small to be a database"},
+                                status_code=400)
+        staged.write_bytes(content)
+
+        ok, msg = _libdb.validate_backup_file(staged)
+        if not ok:
+            staged.unlink(missing_ok=True)
+            return JSONResponse(content={"error": msg}, status_code=400)
+
+        # Safety net before the import overwrites anything
+        snapshot = _libdb.create_backup(kind="pre_restore")
+
+        # Replace the live DB with the imported one
+        import sqlite3 as _sq
+        src = _sq.connect(str(staged), timeout=30)
+        try:
+            dst = _sq.connect(str(_libdb.DB_PATH), timeout=30)
+            try:
+                with _libdb._lock:
+                    src.backup(dst)
+            finally:
+                dst.close()
+        finally:
+            src.close()
+
+        # Archive the import under the standard naming so it shows in the list
+        imported = _libdb.BACKUP_DIR / f"library_{ts}_imported.db"
+        staged.rename(imported)
+        conn = _sq.connect(str(_libdb.DB_PATH), timeout=30)
+        try:
+            rows = conn.execute("SELECT COUNT(*) FROM library_files").fetchone()[0]
+        finally:
+            conn.close()
+
+        return JSONResponse(content={
+            "status": "ok",
+            "imported": imported.name,
+            "safety_snapshot": snapshot["name"],
+            "file_count": rows,
+        })
+    except Exception as e:
+        staged.unlink(missing_ok=True)
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+@app.delete("/api/library/backups/{name}")
+async def api_library_backup_delete(name: str, _=Depends(_require_write_auth)):
+    """Delete one backup by name."""
+    if not _libdb._BACKUP_NAME_RE.match(name):
+        return JSONResponse(content={"error": "Invalid backup name"}, status_code=400)
+    path = _libdb.BACKUP_DIR / name
+    if not path.is_file():
+        return JSONResponse(content={"error": "Backup not found"}, status_code=404)
+    try:
+        path.unlink()
+        return JSONResponse(content={"status": "ok", "deleted": name})
+    except OSError as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
