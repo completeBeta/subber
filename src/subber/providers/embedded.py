@@ -119,11 +119,19 @@ class EmbeddedProvider(SubtitleProvider):
         args.append(str(output_path))
 
         loop = asyncio.get_running_loop()
-        async with _EXTRACT_SEMAPHORE:
-            result = await loop.run_in_executor(
-                None, lambda: subprocess.run(
-                    args, capture_output=True, text=True, timeout=_EXTRACT_TIMEOUT,
+        try:
+            async with _EXTRACT_SEMAPHORE:
+                result = await loop.run_in_executor(
+                    None, lambda: subprocess.run(
+                        args, capture_output=True, text=True, timeout=_EXTRACT_TIMEOUT,
+                    )
                 )
+        except subprocess.TimeoutExpired:
+            # Killed ffmpeg leaves a partial (often 0-byte) output file — a
+            # "poison pill" that blocks future retries as a fake existing sub.
+            Path(output_path).unlink(missing_ok=True)
+            raise RuntimeError(
+                f"ffmpeg extraction timed out after {_EXTRACT_TIMEOUT}s on {video_path.name}"
             )
 
         if result.returncode != 0:

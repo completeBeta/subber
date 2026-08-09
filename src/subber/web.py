@@ -2068,7 +2068,7 @@ async def api_library_retry(request: Request, _=Depends(_require_write_auth)):
     for fid in file_ids:
         record = _libdb.get_file(fid)
         if record:
-            _libdb.update_file_status(fid, status="pending", error_message=None)
+            _libdb.update_file_status(fid, status="pending", error_message="")
             records_to_process.append(record)
             results.append({"id": fid, "status": "queued"})
 
@@ -2081,6 +2081,12 @@ async def api_library_retry(request: Request, _=Depends(_require_write_auth)):
         async def _process_retries():
             try:
                 print(f'[LIBRARY] Background retry started for {len(records_to_process)} files', flush=True)
+                # Re-mount shares — container restarts clear CIFS mounts and a
+                # retry against a dead mount fails deep inside ffmpeg/shutil with
+                # confusing ENOENT errors (this bit us once: .subber_* move died).
+                mount_errors = _libpipe._mount_shares(_libpipe._get_mounts())
+                if mount_errors:
+                    print(f'[LIBRARY] Retry mount errors: {mount_errors}', flush=True)
                 semaphore = asyncio.Semaphore(max_concurrent)
                 tasks = [
                     _libpipe._process_file_with_semaphore(

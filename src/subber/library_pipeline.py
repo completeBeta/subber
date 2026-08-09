@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -332,6 +333,17 @@ async def _process_file(record: dict, scan_id: int, drift_threshold_ms: int) -> 
             return {"success": False, "action": "cancelled", "cost": 0, "error": "Scan cancelled"}
 
     file_path = Path(record["file_path"])
+    if not file_path.exists():
+        # Video not visible — almost always a dead CIFS mount after a container
+        # restart. Fail fast with a clear message instead of a deep ENOENT later.
+        err = f"Video file not accessible (share may be unmounted): {file_path.name}"
+        existing = library_db.get_file_by_path(record["file_path"])
+        if existing:
+            library_db.update_file_status(existing["id"], status="failed", error_message=err)
+        return {"success": False, "action": "failed", "cost": 0, "error": err}
+    # Records fetched for retry carry their stale error_message — strip it so
+    # the upserts below can't resurrect an old error after we clear it.
+    record.pop("error_message", None)
     file_id = library_db.upsert_file(record)
     # upsert_file returns lastrowid which is 0 for UPDATEs, so fetch the real ID
     actual_file = library_db.get_file_by_path(record["file_path"])
@@ -342,9 +354,19 @@ async def _process_file(record: dict, scan_id: int, drift_threshold_ms: int) -> 
             return {"success": True, "action": "skipped", "cost": 0}
 
     # Check for existing subtitle output (from a prior scan that was interrupted)
-    # Avoids re-extraction/download when the work was already done
-    existing_subs = list(file_path.parent.glob(file_path.stem + ".en.*"))
+    # Avoids re-extraction/download when the work was already done.
+    # Ignore EMPTY files — a killed ffmpeg can leave a 0-byte poison pill that
+    # would block retries forever (and shows up blank in Plex).
+    existing_subs = [s for s in file_path.parent.glob(file_path.stem + ".en.*")
+                     if s.stat().st_size > 0]
     if existing_subs:
+        # Valid subtitle on disk — record it properly. Without this, retry rows
+        # keep whatever stale status they had (the upsert above can resurrect
+        # 'failed' from the fetched record) and the UI shows ❌ with no error.
+        library_db.update_file_status(
+            file_id, status="done", subtitle_path=str(existing_subs[0]),
+            error_message="",
+        )
         return {"success": True, "action": "skipped", "cost": 0}
 
     # Mark as in progress
@@ -1020,6 +1042,24 @@ async def _search_download_and_process(
     # Try each result in order: providers can return results with stale or
     # invalid file_ids (e.g. OpenSubtitles "Invalid file_id"), so fall through
     # to the next candidate rather than failing on the first.
+    #
+    # Episode guard: the no-S/E fallback search can return packs for OTHER
+    # episodes (matched S03E01 for an S03E11 request once). Reject candidates
+    # whose filename clearly identifies a different episode.
+    if season is not None and episode is not None and results:
+        before = len(results)
+        guarded = [r for r in results
+                   if _candidate_matches_episode(r.filename or "", season, episode)]
+        dropped = before - len(guarded)
+        if dropped:
+            print(f"[LIBRARY] Episode guard: dropped {dropped} candidate(s) for "
+                  f"wrong episode (wanted S{season:02d}E{episode:02d})", flush=True)
+        if not guarded:
+            return {"success": False,
+                    "error": f"No subtitles found for S{season:02d}E{episode:02d} "
+                             f"({before} candidate(s) were for other episodes)"}
+        results = guarded
+
     import uuid, tempfile
     best = None
     downloaded_path = None
@@ -1043,15 +1083,27 @@ async def _search_download_and_process(
     if best is None or downloaded_path is None:
         return {"success": False, "error": f"Download failed: {last_err}"}
 
-    # Move to target dir with unique name
+    # Move to target dir with unique name (retried — CIFS shares flap briefly
+    # under load and a single ENOENT should not kill a download we paid for).
     tmp_name = f".subber_{uuid.uuid4().hex[:8]}_{best.filename}"
     tmp_dest = video_path.parent / tmp_name
-    shutil.move(str(downloaded_path), str(tmp_dest))
+    await _robust_move(downloaded_path, tmp_dest)
     shutil.rmtree(tmp_dir, ignore_errors=True)
     downloaded_path = tmp_dest
 
     downloaded_path = Path(downloaded_path)
     provider_name = best.provider if hasattr(best, "provider") else "unknown"
+
+    # Normalize the downloaded file: some providers serve zip/gzip archives
+    # (multi-episode packs). Unpack them and pick the member that matches the
+    # target episode — grabbing the first member can yield the WRONG episode.
+    try:
+        downloaded_path = _unpack_archive_subtitle(
+            downloaded_path, season, episode,
+        )
+    except ValueError as e:
+        downloaded_path.unlink(missing_ok=True)
+        return {"success": False, "error": str(e)}
 
     # Check if downloaded sub is English
     sub_lang = _detect_sub_language(downloaded_path)
@@ -1106,6 +1158,129 @@ async def _search_download_and_process(
 
 
 # ── Helper functions ──
+
+# Episode markers like S03E11, S3E5, S03 E11 in provider filenames
+_SE_MARKER_RE = re.compile(r"S(\d{1,2})[ ._-]*E(\d{1,3})", re.IGNORECASE)
+
+
+def _candidate_matches_episode(filename: str, season, episode) -> bool:
+    """Return False only when the filename clearly identifies a DIFFERENT episode.
+
+    Conservative on purpose: filenames without episode markers pass through
+    (many providers use opaque names); only explicit SxxEyy markers that all
+    disagree with the target cause rejection.
+    """
+    if season is None or episode is None:
+        return True
+    markers = _SE_MARKER_RE.findall(filename)
+    if not markers:
+        return True
+    for s, e in markers:
+        if int(s) == int(season) and int(e) == int(episode):
+            return True
+    return False
+
+
+async def _robust_move(src: Path, dst: Path, attempts: int = 3) -> None:
+    """Move a file onto the share with retries.
+
+    CIFS mounts flap momentarily under concurrent load; shutil.move raises
+    FileNotFoundError on the destination when that happens. Back off and retry
+    rather than losing an already-downloaded subtitle.
+    """
+    loop = asyncio.get_running_loop()
+    last_err = None
+    for attempt in range(attempts):
+        try:
+            await loop.run_in_executor(None, lambda: shutil.move(str(src), str(dst)))
+            return
+        except OSError as e:
+            last_err = e
+            if attempt < attempts - 1:
+                await asyncio.sleep(1.5 * (attempt + 1))
+    raise last_err
+
+
+_SUBTITLE_SUFFIXES = (".srt", ".ass", ".ssa", ".sub", ".vtt")
+
+
+def _unpack_archive_subtitle(path: Path, season=None, episode=None) -> Path:
+    """Ensure the downloaded file is a usable subtitle, unpacking archives.
+
+    Providers (SubDL, OpenSubtitles) sometimes serve zip/gzip archives —
+    including multi-episode season packs. Detect archives by MAGIC BYTES
+    (extensions lie: a zip can arrive named `...zip.srt`), unpack, and pick the
+    member for the target episode.
+
+    Raises ValueError when the archive holds no usable subtitle for the target
+    episode (better to fail cleanly than write the WRONG episode's text).
+    """
+    import gzip
+    import io
+    import zipfile
+
+    head = path.read_bytes()[:4]
+
+    # Plain subtitle — nothing to unpack
+    if head[:2] != b"PK" and head[:2] != b"\x1f\x8b":
+        return path
+
+    if head[:2] == b"\x1f\x8b":  # gzip: single file inside
+        raw = gzip.decompress(path.read_bytes())
+        name = path.name
+        if name.lower().endswith(".gz"):
+            out_name = name[:-3]
+        else:
+            out_name = path.stem
+        if not out_name.lower().endswith(_SUBTITLE_SUFFIXES):
+            out_name += ".srt"
+        out = path.parent / out_name
+        out.write_bytes(raw)
+        if out != path:
+            path.unlink(missing_ok=True)
+        return out
+
+    # ZIP archive — collect subtitle members
+    with zipfile.ZipFile(io.BytesIO(path.read_bytes())) as zf:
+        members = [n for n in zf.namelist()
+                   if not n.endswith("/")
+                   and n.lower().endswith(_SUBTITLE_SUFFIXES)]
+        if not members:
+            raise ValueError(
+                f"Archive contained no subtitle files ({len(zf.namelist())} entries)"
+            )
+
+        # Prefer the member that matches the target episode
+        chosen = None
+        if season is not None and episode is not None:
+            for name in members:
+                base = Path(name).name
+                if _candidate_matches_episode(base, season, episode):
+                    chosen = name
+                    break
+        if chosen is None and len(members) == 1:
+            chosen = members[0]
+        if chosen is None and season is not None and episode is not None:
+            raise ValueError(
+                f"Archive holds {len(members)} subtitles but none matches "
+                f"S{season:02d}E{episode:02d}"
+            )
+        if chosen is None:
+            # No episode target (movies) — keep historic behavior, take first
+            chosen = members[0]
+
+        content = zf.read(chosen)
+        ext = Path(chosen).suffix.lower() or ".srt"
+
+    # Write the chosen subtitle next to the archive, then remove the archive.
+    # Guard: archives often have LYING extensions (pack.zip.srt) where
+    # with_suffix returns the same path — never unlink what we just wrote.
+    out = path.with_suffix(ext)
+    out.write_bytes(content)
+    if out != path:
+        path.unlink(missing_ok=True)
+    return out
+
 
 def _find_external_en(video_path: Path) -> Path | None:
     """Find an English external subtitle next to a video."""
