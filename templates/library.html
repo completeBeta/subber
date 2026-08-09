@@ -8,9 +8,9 @@
         Scan your media library and ensure every video has synced English subtitles.
     </p>
 
-    <!-- SubDL PRO warning banner -->
+    <!-- SubDL quota banner (downloads/day — the real limit, not API requests) -->
     <div id="pro-mode-banner" style="display: none; background: #f59e0b; color: #000; padding: 0.6rem 1rem; border-radius: 6px; margin-bottom: 1rem; font-weight: 600; text-align: center;">
-        SubDL PRO mode is ACTIVE — 30,000 API requests/day limit
+        <span id="subdl-quota-text">SubDL: checking download quota...</span>
     </div>
 
     <!-- Status Bar -->
@@ -843,16 +843,27 @@ async function retryFile(fileId) {
 }
 
 
-// Check SubDL PRO mode status
+// Check SubDL download-quota status (downloads/day — free: 50, PRO: 2,000).
+// Synced from SubDL's /api/v2/me, not the raw API request counter.
 async function checkProMode() {
+    const banner = document.getElementById("pro-mode-banner");
+    if (!banner) return;
     try {
-        const resp = await fetch("/api/config");
+        const resp = await fetch("/api/providers/subdl/usage");
+        if (!resp.ok) { banner.style.display = "none"; return; }
         const data = await resp.json();
-        const proMode = data.providers && data.providers.subdl && data.providers.subdl.pro_mode;
-        const banner = document.getElementById("pro-mode-banner");
-        if (banner) banner.style.display = proMode ? "block" : "none";
+        if (data.error) { banner.style.display = "none"; return; }
+        const used = data.downloads_used_today || 0;
+        const limit = data.daily_limit || 0;
+        const remaining = data.remaining || 0;
+        const planLabel = data.plan === "pro" ? "PRO" : "Free";
+        document.getElementById("subdl-quota-text").textContent =
+            `SubDL (${planLabel}): ${used} / ${limit} downloads used today — ${remaining} remaining`;
+        banner.style.background = remaining <= Math.ceil(limit * 0.1) ? "#dc2626" : "#f59e0b";
+        banner.style.color = remaining <= Math.ceil(limit * 0.1) ? "#fff" : "#000";
+        banner.style.display = "block";
     } catch (e) {
-        console.error("PRO mode check error:", e);
+        console.error("SubDL quota check error:", e);
     }
 }
 checkProMode();

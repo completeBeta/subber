@@ -2273,6 +2273,41 @@ async def api_library_download_report(name: str):
 
 # ── OpenSubtitles usage endpoint ──
 
+@app.get("/api/providers/subdl/usage")
+async def api_subdl_usage():
+    """Get current SubDL download-quota stats (synced from SubDL /api/v2/me).
+
+    Returns downloads-per-day usage — the real limit users should care about
+    (free: 50/day, PRO: 2,000/day) — instead of the raw API request count.
+    """
+    try:
+        ps = _subber_config.providers_settings()
+        cfg = ps.get("subdl", {})
+        from .providers.subdl import SubDLProvider, DOWNLOAD_LIMITS, USAGE_FILE
+        prov = SubDLProvider(api_key=cfg.get("api_key", ""), pro_mode=bool(cfg.get("pro_mode")))
+        entry = await prov.sync_usage()
+        if entry is None:
+            # Sync failed — fall back to cached file or tier defaults
+            entry = prov._cached_usage()
+            if entry is None:
+                tier = "pro" if cfg.get("pro_mode") else "free"
+                entry = {
+                    "used": 0,
+                    "limit": DOWNLOAD_LIMITS[tier],
+                    "remaining": DOWNLOAD_LIMITS[tier],
+                    "synced_at": None,
+                }
+        return JSONResponse(content={
+            "plan": "pro" if cfg.get("pro_mode") else "free",
+            "downloads_used_today": entry.get("used", 0),
+            "daily_limit": entry.get("limit", DOWNLOAD_LIMITS["pro" if cfg.get("pro_mode") else "free"]),
+            "remaining": entry.get("remaining", 0),
+            "synced_at": entry.get("synced_at"),
+        })
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
 @app.get("/api/providers/opensubtitles/usage")
 async def api_opensubtitles_usage():
     """Get current OpenSubtitles usage stats."""
