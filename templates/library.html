@@ -556,7 +556,7 @@ function confirmFullScan() {
     const dryRun = document.getElementById('dry-run-toggle').checked;
     const msg = dryRun
         ? '⚠ Dry-run scan — no changes will be made. This will re-scan ALL files in your library. Continue?'
-        : '⚠ WARNING: Full scan with Dry Run OFF will re-process EVERY file from scratch (re-extract, re-download, re-translate). Existing subtitle files may be overwritten. Are you sure?';
+        : 'A full scan re-checks all files but skips any already marked done or with existing subtitles — only pending files and previous failures are re-processed. Continue?';
     if (!confirm(msg)) return;
     startScan('full');
 }
