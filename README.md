@@ -4,6 +4,21 @@
 
 Upload a video, Subber finds subtitles across 6 providers, syncs them with ffsubsync, and translates non-English subs using **OpenRouter Llama 3.1 8B** (recommended — fast, cheap, accurate) with DeepSeek or Ollama as fallbacks. Or scan your entire media library and Subber handles everything automatically.
 
+## ⚙️ How It Works
+
+A library scan follows a deterministic pipeline designed to be **safe to run repeatedly** on a live media collection:
+
+1. **Mounts SMB/CIFS shares** — auto-mounts configured shares at scan start (30s timeout, dead mounts abort cleanly instead of failing every file)
+2. **Walks the filesystem** — discovers new, changed, and unprocessed files; skips anything already marked `done` in the DB
+3. **Checks for existing subtitles** — if a non-empty `.en.srt`/`.en.ass` already sits next to the video, it's skipped immediately (no re-download, no re-sync)
+4. **Extracts embedded subtitles** — ffmpeg pulls subtitle tracks from video files (configurable timeout, partial output cleaned on failure)
+5. **Searches external providers** — SubDL → Addic7ed → Podnapisi → Subscene, with OpenSubtitles as a rate-limited fallback; episode-matching guard prevents wrong-episode downloads; zip/gzip packs are unpacked and matched
+6. **Syncs with ffsubsync** — audio-alignment with drift threshold; skips re-sync if drift is below threshold
+7. **Translates if needed** — non-English subs go through the LLM backend chain (OpenRouter → DeepSeek → Ollama) with automatic fallback
+8. **Marks complete** — writes result to SQLite; scan progress, costs, and timing are all persisted
+
+**Crash recovery:** if the container dies mid-scan, Resume picks up exactly where it left off — done files are skipped, in-progress files are re-processed. An automatic DB backup runs before every scan (newest 5 kept, oldest cycled out).
+
 ## 🚀 Quick Start (Docker)
 
 ### 1. Clone and configure
