@@ -137,8 +137,7 @@ Providers are searched in priority order. **OpenSubtitles is a fallback** — on
 | 🔑 **SubDL** | REST API | API key | Free: 2,000 requests + 50 downloads · PRO: 30,000 requests + 2,000 downloads | No |
 | 📺 **Addic7ed** | Web scraping | Cookies (some downloads) | Fair use (no published limit) | No |
 | 🌍 **Podnapisi** | Web scraping | None | Fair use (no published limit) | No |
-| ~~🎬 **Subscene**~~ | Web scraping | None | **Shut down May 2024** | — |
-| 🌐 **OpenSubtitles** | REST API | .org user/pass or .com API key | .org VIP: 1,000 downloads · .com API: Free→Pro packages (2,000–100,000 downloads) | **Yes** |
+| 🌐 **OpenSubtitles** | REST API | .org user/pass or .com API key | .org VIP: 1,000 downloads · .com API: 5 (free) → 100,000 (Pro) downloads | **Yes** |
 
 ### 🔑 OpenSubtitles Setup
 
@@ -163,7 +162,8 @@ If you purchased an API package at [opensubtitles.com](https://www.opensubtitles
 
 | Plan | Downloads/24h |
 |---|---|
-| Free | user-level (varies by account standing) |
+| Free | 5 (anonymous-download default) |
+| Developer | 100 (the "Under dev" consumer-key flag) |
 | Light ($20/mo) | 2,000 |
 | Startup ($50/mo) | 5,000 |
 | Basic ($100/mo) | 15,000 |
@@ -171,7 +171,7 @@ If you purchased an API package at [opensubtitles.com](https://www.opensubtitles
 | Pro ($400/mo) | 100,000 |
 | Enterprise | custom |
 
-> The free plan's download cap depends on your account's user level, and free downloads carry ads inside the subtitle file. Paid plans (Light and up) are ad-free. Yearly billing gives a 20% discount. Only **downloads** are limited — search and other endpoints are unlimited, subject to a per-IP request rate (5 req/s free → 50 req/s Basic and up).
+> **Free vs Developer** are consumer-key flags, not paid plans: "Allow anonymous downloads" caps a key at 5/day, and the "Under dev" flag raises it to 100/day without authentication. Light and above are paid API subscriptions — ad-free, and only **downloads** are limited (search and other endpoints are unlimited, subject to a per-IP request rate of 5 req/s free → 50 req/s Basic and up). Yearly billing gives a 20% discount.
 
 ## 🤖 LLM Backends
 

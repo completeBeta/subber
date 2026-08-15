@@ -12,11 +12,27 @@ translation:
   max_retries: 1
   timeout: 120
   backends:
-    - name: DeepSeek V4 Flash
-      api_base: https://api.deepseek.com/v1
-      api_key: ""                    # Your DeepSeek API key
-      model: deepseek-v4-flash
+    # Provider-agnostic: `name` is a free-form label; the actual model is
+    # determined by `api_base` + `model`. Any OpenAI-compatible API works.
+    # Recommended: OpenRouter + Llama 3.1 8B (~$1 for hundreds of episodes).
+    - name: Example Provider
+      api_base: https://openrouter.ai/api/v1
+      api_key: ""                    # Your API key for the provider above
+      model: meta-llama/llama-3.1-8b-instruct
       priority: 0
+    # Add more backends for automatic fallback. Uncomment and adjust:
+    # DeepSeek:
+    #   - name: DeepSeek
+    #     api_base: https://api.deepseek.com/v1
+    #     api_key: ""                # Your DeepSeek API key
+    #     model: deepseek-v4-flash
+    #     priority: 1
+    # Local Ollama (no key needed):
+    #   - name: Ollama (local)
+    #     api_base: http://localhost:11434/v1
+    #     api_key: ""
+    #     model: llama3.2:3b
+    #     priority: 2
 
 # --- Subtitle Sync ---
 sync:
@@ -34,15 +50,15 @@ providers:
     - subscene
     - opensubtitles             # Fallback — only searched if nothing else found
   subdl:
-    api_key: ""                  # Free key from subdl.com (~2,000/day)
-    pro_mode: false              # Set true for 30,000/day PRO plan
+    api_key: ""                  # Free key from subdl.com (2,000 requests + 50 downloads/day)
+    pro_mode: false              # PRO: 30,000 requests + 2,000 downloads/day
   addic7ed:
     cookies: ""                  # Browser cookies for addic7ed.com
   opensubtitles:
     api_key: ""                  # .com API consumer key (opensubtitles.com/consumers)
-    username: ""                 # .org VIP username (1,000/day with VIP)
+    username: ""                 # .org VIP username (1,000 downloads/day with VIP)
     password: ""                 # .org VIP password
-    tier: free                   # free (5/day) | vip (.org auth 1,000/day) | premium (.com 5,000/day)
+    tier: free                   # free (5/day) | dev (100/day) | lite (2,000) | startup (5,000) | basic (15,000) | premium (50,000) | pro (100,000) | vip (.org 1,000/day)
     daily_limit: 0               # Override daily limit (0 = use tier default)
   subscene: true
   podnapisi: true                # Disabled by default (DNS issues)
@@ -79,22 +95,23 @@ ui:
 
 # --- Cost Estimation ---
 # Controls translation cost tracking and estimates shown in Library scans.
+# Set these to YOUR provider's published prices (per million tokens).
 # Per-model overrides: add a "models" map keyed by model name for provider-specific pricing.
 cost:
-  input_cost_per_million: 0.14   # DeepSeek = 0.14, OpenAI = 2.50
-  output_cost_per_million: 0.28  # DeepSeek = 0.28, OpenAI = 10.00
+  input_cost_per_million: 0.14   # Example: DeepSeek ~0.14, OpenAI ~2.50 — use your provider's input price
+  output_cost_per_million: 0.28  # Example: DeepSeek ~0.28, OpenAI ~10.00 — use your provider's output price
   chars_per_token: 2.5           # 2.5 for CJK, 4.0 for English
-  peak_enabled: false            # Enable peak pricing multiplier
-  peak_multiplier: 2.0           # DeepSeek charges 2x during peak hours
+  peak_enabled: false            # Enable peak pricing multiplier (if your provider charges more at peak)
+  peak_multiplier: 2.0           # Multiplier applied during peak hours
   peak_hours_utc:                # Peak hour ranges in UTC
     - [1, 4]
     - [6, 10]
   timezone: UTC                  # Your timezone for peak hour calculation
   # Per-model overrides (optional):
   # models:
-  #   deepseek-chat:
-  #     input_cost_per_million: 0.14
-  #     output_cost_per_million: 0.28
+  #   meta-llama/llama-3.1-8b-instruct:
+  #     input_cost_per_million: 0.03
+  #     output_cost_per_million: 0.05
 
 # --- Limits ---
 limits:
