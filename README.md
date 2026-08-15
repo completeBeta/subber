@@ -2,7 +2,7 @@
 
 **Subtitle grabber, sync, and translator — Docker + Web UI.**
 
-Upload a video, Subber finds subtitles across 6 providers, syncs them with ffsubsync, and translates non-English subs using **OpenRouter Llama 3.1 8B** (recommended — fast, cheap, accurate) with DeepSeek or Ollama as fallbacks. Or scan your entire media library and Subber handles everything automatically.
+Upload a video, Subber finds subtitles across 5 providers, syncs them with ffsubsync, and translates non-English subs using **OpenRouter Llama 3.1 8B** (recommended — fast, cheap, accurate) with DeepSeek or Ollama as fallbacks. Or scan your entire media library and Subber handles everything automatically.
 
 ## ⚙️ How It Works
 
@@ -12,7 +12,7 @@ A library scan follows a deterministic pipeline designed to be **safe to run rep
 2. **Walks the filesystem** — discovers new, changed, and unprocessed files; skips anything already marked `done` in the DB
 3. **Checks for existing subtitles** — if a non-empty `.en.srt`/`.en.ass` already sits next to the video, it's skipped immediately (no re-download, no re-sync)
 4. **Extracts embedded subtitles** — ffmpeg pulls subtitle tracks from video files (configurable timeout, partial output cleaned on failure)
-5. **Searches external providers** — SubDL → Addic7ed → Podnapisi → Subscene, with OpenSubtitles as a rate-limited fallback; episode-matching guard prevents wrong-episode downloads; zip/gzip packs are unpacked and matched
+5. **Searches external providers** — SubDL → Addic7ed → Podnapisi, with OpenSubtitles as a rate-limited fallback; episode-matching guard prevents wrong-episode downloads; zip/gzip packs are unpacked and matched
 6. **Syncs with ffsubsync** — audio-alignment with drift threshold; skips re-sync if drift is below threshold
 7. **Translates if needed** — non-English subs go through the LLM backend chain (OpenRouter → DeepSeek → Ollama) with automatic fallback
 8. **Marks complete** — writes result to SQLite; scan progress, costs, and timing are all persisted
@@ -61,7 +61,7 @@ docker compose up -d --build
 ## 📑 Tabs
 
 ### 🎬 Grab
-Drop a video file — Subber probes for embedded subtitles, searches providers (SubDL, Addic7ed, Podnapisi, Subscene, OpenSubtitles, Embedded), downloads the best match, syncs it with ffsubsync, and translates if needed.
+Drop a video file — Subber probes for embedded subtitles, searches providers (SubDL, Addic7ed, Podnapisi, OpenSubtitles, Embedded), downloads the best match, syncs it with ffsubsync, and translates if needed.
 
 - **Multi-file concurrent uploads** with XHR progress
 - **Batch zip processing** — drop a zip of videos, processes all in parallel
@@ -96,7 +96,7 @@ Scan your media library — Subber walks directories, classifies files as TV/mov
 - **Progress tracking** — per-file progress bar increments in real time during scans
 - **Bulk retry** — one-click "Retry All Failed" banner when viewing failed files; retries auto-remount shares
 - **💾 DB Backups** — auto backup before every scan + manual Backup Now; import/export/restore with safety snapshots; 5-backup rotation
-- **Cost tracking** — per-file translation cost with accurate DeepSeek pricing (input+output tokens)
+- **Cost tracking** — per-file translation cost with per-token input/output pricing
 - **Smart fansub stripping** — removes [GroupName] tags and hex hashes from show titles
 - **OpenSubtitles fallback** — only searched when primary providers find nothing, saving quota
 - **ConvertX integration** — deploy ConvertX alongside Subber for video conversion
@@ -118,7 +118,7 @@ Real-time log viewer with search, level filter, auto-refresh, **full-history exp
 Full configuration UI with live save:
 
 - **AI Backends** — multiple translation backends with priority ordering (OpenRouter, DeepSeek, Ollama, OpenAI-compatible)
-- **Subtitle Providers** — toggle and configure SubDL (with PRO mode), Addic7ed, Podnapisi, Subscene, OpenSubtitles (.org VIP 1,000/day or [.com](http://opensubtitles.com) API packages), Embedded
+- **Subtitle Providers** — toggle and configure SubDL (with PRO mode), Addic7ed, Podnapisi, OpenSubtitles (.org VIP 1,000/day or [.com](http://opensubtitles.com) API packages), Embedded
 - **Cost Estimation** — per-token input/output pricing with peak hour multipliers and per-model overrides
 - **🔒 Security** — optional API key for write protection (disabled by default)
 - **💾 DB Backups** — automatic scan-start backup + manual Backup Now; import/export/restore with safety snapshots
@@ -129,16 +129,16 @@ Full configuration UI with live save:
 
 ## 🌍 Subtitle Providers
 
-Providers are searched in priority order. **OpenSubtitles is a fallback** — only searched if primary providers (SubDL, Addic7ed, Podnapisi, Subscene) return nothing. This saves your daily quota for when nothing else works.
+Providers are searched in priority order. **OpenSubtitles is a fallback** — only searched if primary providers (SubDL, Addic7ed, Podnapisi) return nothing. This saves your daily quota for when nothing else works.
 
-| Provider | Type | Auth | Rate Limit | Fallback? |
+| Provider | Type | Auth | Daily Limits | Fallback? |
 |---|---|---|---|---|
 | 🎬 **Embedded** | ffmpeg extraction | None | Unlimited | No |
-| 🔑 **SubDL** | REST API | API key | 2,000/day (30,000 PRO) | No |
-| 📺 **Addic7ed** | Web scraping | Cookies | Fair use | No |
-| 🌍 **Podnapisi** | Web scraping | None | Fair use | No |
-| 🎬 **Subscene** | Web scraping | None | Fair use | No |
-| 🌐 **OpenSubtitles** | REST API | .org user/pass or .com API key | 20/day Lite, 40/day Developer, 1,000/day .org VIP, configurable .com | **Yes** |
+| 🔑 **SubDL** | REST API | API key | Free: 2,000 requests + 50 downloads · PRO: 30,000 requests + 2,000 downloads | No |
+| 📺 **Addic7ed** | Web scraping | Cookies (some downloads) | Fair use (no published limit) | No |
+| 🌍 **Podnapisi** | Web scraping | None | Fair use (no published limit) | No |
+| ~~🎬 **Subscene**~~ | Web scraping | None | **Shut down May 2024** | — |
+| 🌐 **OpenSubtitles** | REST API | .org user/pass or .com API key | .org VIP: 1,000 downloads · .com API: Free→Pro packages (2,000–100,000 downloads) | **Yes** |
 
 ### 🔑 OpenSubtitles Setup
 
@@ -155,13 +155,23 @@ If you have a VIP subscription at [opensubtitles.org](https://www.opensubtitles.
 
 > **Why the API key?** The `.org` and `.com` share the same REST API. The consumer key authorizes API access; your username+password authenticates your VIP account.
 
-#### opensubtitles.com API Consumer (configurable limit)
+#### opensubtitles.com API Consumer (package-based limits)
 If you purchased an API package at [opensubtitles.com](https://www.opensubtitles.com):
 1. Get your API key from [opensubtitles.com/consumers](https://www.opensubtitles.com/en/consumers)
 2. In Subber Settings → OpenSubtitles → `.com API Consumer Key` section, paste your key
-3. Select your tier: Free (5/day), Premium (5,000/day), or set a custom daily limit
+3. Select the plan your key is subscribed to:
 
-> **Daily limit override:** Set a custom number in the "Custom daily limit" field to override the tier default. Useful for enterprise packages (up to 50,000/day).
+| Plan | Downloads/24h |
+|---|---|
+| Free | user-level (varies by account standing) |
+| Light ($20/mo) | 2,000 |
+| Startup ($50/mo) | 5,000 |
+| Basic ($100/mo) | 15,000 |
+| Premium ($200/mo) | 50,000 |
+| Pro ($400/mo) | 100,000 |
+| Enterprise | custom |
+
+> The free plan's download cap depends on your account's user level, and free downloads carry ads inside the subtitle file. Paid plans (Light and up) are ad-free. Yearly billing gives a 20% discount. Only **downloads** are limited — search and other endpoints are unlimited, subject to a per-IP request rate (5 req/s free → 50 req/s Basic and up).
 
 ## 🤖 LLM Backends
 
@@ -222,9 +232,9 @@ Video file → ffprobe (subtitle tracks)
            → ProviderRegistry.search_all() (primary providers first, fallback last)
            → Download best match
            → ffsubsync (audio alignment)
-           → DeepSeek/Ollama (translation if needed)
+           → OpenRouter/DeepSeek/Ollama (translation if needed)
            → Save to library / return to user
-           → Cost estimator: accurate DeepSeek input+output pricing
+           → Cost estimator: per-token input+output pricing
            → Cancel scan: DELETE /api/library/scan/{id}
            → Incremental progress: per-file scan counter updates
 ```
@@ -243,7 +253,6 @@ src/subber/
 │   ├── subdl.py        # SubDL REST API
 │   ├── addic7ed.py     # Addic7ed scraper
 │   ├── podnapisi.py    # Podnapisi scraper
-│   ├── subscene.py     # Subscene scraper
 │   ├── opensubtitles.py # OpenSubtitles REST API (rate-limited)
 │   ├── embedded.py     # ffmpeg subtitle extraction
 │   ├── registry.py     # Parallel provider search (primary-first, fallback-last)
@@ -300,7 +309,7 @@ pip install -e ".[dev]"
 - **Docker** with Docker Compose
 - **SMB/CIFS mounts** (optional): container needs `cap_add: [SYS_ADMIN, DAC_READ_SEARCH]` in `docker-compose.yml`
 - **cifs-utils**: installed automatically in the Docker image (for SMB mount support)
-- **Translation**: DeepSeek API key (or Ollama for local)
+- **Translation**: OpenRouter API key (recommended — Llama 3.1 8B), or DeepSeek/Ollama for local/alternative
 - **Subtitles**: free API keys from SubDL and OpenSubtitles (optional but recommended)
 
 ## 🔑 Configuration
