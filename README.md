@@ -61,71 +61,78 @@ docker compose up -d --build
 ## 📑 Tabs
 
 ### 🎬 Grab
-Drop a video file — Subber probes for embedded subtitles, searches providers (SubDL, Addic7ed, Podnapisi, OpenSubtitles, Embedded), downloads the best match, syncs it with ffsubsync, and translates if needed.
+Upload one or more video files (or a `.zip` of videos) and Subber runs the full pipeline on each: probe for embedded subtitles → search external providers → download the best match → sync with ffsubsync → translate if needed.
 
-- **Multi-file concurrent uploads** with XHR progress
-- **Batch zip processing** — drop a zip of videos, processes all in parallel
-- **History persistence** — results survive page refreshes and container restarts
-- **Clear History** button for cleanup
+**Controls:**
+- **Browse / drag-and-drop** — add video files or a zip batch
+- **Auto-sync with ffsubsync** checkbox — toggle audio alignment on/off
+- **Start Processing** — begin the pipeline on the selected files
+- **Clear** — remove the selected files before processing
+- **Pipeline log** (expandable) — live per-file progress
+- **+ Add Another** — reset the form to process more files
+- **Clear History** — wipe the on-page results list
 
-### 🎯 Sync Video + Subtitle (Grab tab)
-Drop a video + subtitle pair — ffsubsync aligns them automatically. Shows the computed offset (e.g., `-11.18s / 11180ms`). Manual offset input for files where auto-detection fails.
+**🎯 Sync Video + Subtitle** (below the main grab zone) — drop a video + subtitle pair and ffsubsync aligns them. If auto-detection fails, enter a **manual offset** (seconds, negative = shift earlier).
 
 ### 📚 Library
-Scan your media library — Subber walks directories, classifies files as TV/movie, detects subtitle status, and processes everything automatically.
+Scan your media library. Subber walks your configured directories, classifies files as TV/movie, identifies shows, detects which files already have subtitles, and processes the rest — extracting embedded subs, searching providers, syncing, and translating automatically.
 
-- **Show Identification** via AniList (free, no API key) — resolves messy filenames to canonical titles
-- **TMDB fallback** (optional API key) for movies and western TV
-- **Rate-limited with caching** — safe for 1000+ shows
-- **PGS distrust** — image-based subtitle tracks with wrong language metadata are flagged
-- **Content-based language verification** — reads subtitle content to verify ffprobe language tags
-- **Provider search with identified titles** — uses canonical English titles for higher match rates
-- **Embedded subtitle extraction** with smart track selection (prefers dialogue tracks)
-- **OpenRouter Llama 3.1 8B** translation (recommended — fast, cheap, accurate) with DeepSeek/Ollama fallback
-- **ffsubsync audio alignment** for all subtitles
-- **Zip/gzip subtitle pack unpacking** — zip/gzip downloads are extracted and episode-matched before sync
-- **Episode guard** — prevents wrong-episode downloads from fallback provider search
-- **CIFS robustness** — move-to-share retries with backoff; stale/inaccessible files handled gracefully
-- **Mount dead-man switch** — scan aborts cleanly when all SMB mounts are down (instead of failing thousands of files)
-- **Configurable extraction timeout** — ffmpeg timeout tunable via env var (default 900s) with concurrency cap
-- **SQLite persistence** — scan state, file metadata, costs, and timing all stored
-- **Smart rescan** — "Scan New Only" picks up genuinely new files; "Scan Library (Full)" rescans everything
-- **📄 Reports** — click ☰ Reports to generate/save/view Markdown reports with success/fail/pending breakdowns and action items
-- **Live auto-update** — file list refreshes during scans, expanded detail rows persist across updates
-- **Clickable status pills** — click Total/Done/Pending/Failed/Skipped to filter instantly
-- **Progress tracking** — per-file progress bar increments in real time during scans
-- **Bulk retry** — one-click "Retry All Failed" banner when viewing failed files; retries auto-remount shares
-- **💾 DB Backups** — auto backup before every scan + manual Backup Now; import/export/restore with safety snapshots; 5-backup rotation
-- **Cost tracking** — per-file translation cost with per-token input/output pricing
-- **Smart fansub stripping** — removes [GroupName] tags and hex hashes from show titles
-- **OpenSubtitles fallback** — only searched when primary providers find nothing, saving quota
-- **ConvertX integration** — deploy ConvertX alongside Subber for video conversion
+**Controls:**
+- **Scan Library (Full)** — re-check every file (already-done files are skipped)
+- **Scan New Only** — process only new/changed files
+- **Pause / Resume / Cancel Scan** — appear while a scan is running
+- **☰ Reports** — generate, view, save, and download Markdown reports
+- **Reset Statistics** — clear the scan counters
+- **Status pills** (Total / Done / Pending / Failed / Skipped) — click any pill to filter the list
+- **Retry** (per file) — re-process a single failed file
+- **🔄 Retry All** — banner when viewing failed files; re-queues all of them
+- **Pagination** (First / Prev / Next / Last) — page through large libraries
 
 ### 🌍 Translate
-Upload `.srt`, `.ass`, `.vtt`, or `.zip` files for translation. Multi-backend support with automatic fallback.
+Upload `.srt`, `.ass`, `.vtt`, or `.zip` subtitle files and translate them between languages using your configured LLM backends.
 
-- **History persistence** with progress bars for in-progress jobs
-- **Auto-polling** while jobs are active
-- **Clear History** button
+**Controls:**
+- **From / To** dropdowns — source and target language
+- **Translate** — start the translation
+- **Cancel** — stop an in-progress job
+- **Download Translated File** — save the result
+- **Recent Translations** — history of past jobs with progress; **Clear History** wipes it
 
 ### 🔍 Search
-Search all enabled providers by show name, season, and episode. Returns results with download links.
+Search all enabled providers by show name or video path, and download a specific subtitle from the results.
+
+**Controls:**
+- **Search box** — type a show name (text search) or paste a video path (hash-based matching, more accurate)
+- **Search** — run the query across providers
+- **Download** (per result) — fetch that subtitle file
 
 ### 📋 Logs
-Real-time log viewer with search, level filter, auto-refresh, **full-history export**, and **redacted diagnostics bundle** (safe for bug reports). Shows live **API call stats** per provider (searches/downloads today). Daily log rotation with **45-day retention**.
+Real-time log viewer with filtering and export.
+
+**Controls:**
+- **Search / Level / Lines** — filter by text, log level, and line count
+- **Auto-refresh** checkbox — poll for new lines every 5 seconds
+- **🔄 Refresh / Clear** — reload the log or reset filters
+- **⬇ Download Log** — download the current log file
+- **⬇ Export Full History** — all rotated daily files + current log in one file
+- **🩺 Diagnostics** — download a redacted system/config/error bundle (safe to share in bug reports)
+- **📊 API Calls Today** — live per-provider search/download counts
 
 ### ⚙️ Settings
-Full configuration UI with live save:
+Full configuration UI. **Save Settings** persists everything (with validation that blocks saving a broken config).
 
-- **AI Backends** — multiple translation backends with priority ordering (OpenRouter, DeepSeek, Ollama, OpenAI-compatible)
-- **Subtitle Providers** — toggle and configure SubDL (with PRO mode), Addic7ed, Podnapisi, OpenSubtitles (.org VIP 1,000/day or [.com](http://opensubtitles.com) API packages), Embedded
-- **Cost Estimation** — per-token input/output pricing with peak hour multipliers and per-model overrides
-- **🔒 Security** — optional API key for write protection (disabled by default)
-- **💾 DB Backups** — automatic scan-start backup + manual Backup Now; import/export/restore with safety snapshots
-- **✅ Save Validation** — red outlines + clickable error summary (e.g. missing VIP credentials) prevents saving broken config
-- **Show Identification** — AniList toggle, TMDB API key, preferred source selector
-- **Library Settings** — scan paths, concurrency, sync threshold, auto-scan interval
-- **SMB/CIFS Library Mounts** — configure and test shares with password-guarded save (never wipes credentials on edit)
+- **Translation Settings** — target language, temperature, chunking, timeouts
+- **Translation Providers** — add/remove LLM backends with priority ordering (**+ Add Backend**)
+- **Default Languages** — preferred subtitle language order and acceptable track types
+- **Subtitle Sync** — sync engine and drift threshold
+- **Subtitle Providers** — enable/disable providers and enter credentials (SubDL key, OpenSubtitles, Addic7ed cookies)
+- **Cost Estimation** — per-token pricing with peak-hour multipliers (**+ Add Range**)
+- **Show Identification** — AniList/TMDB settings and preferred source
+- **Library Settings** — scan paths, concurrency, auto-scan interval
+- **Library Mounts (SMB/CIFS)** — add mounts (**+ Add Mount**), **Test** a share, **Remove** it
+- **💾 Database Backups** — **Backup Now**, **Refresh** the list, **Restore**, or delete a backup
+- **⚠ Caution Zone** — upload size and minimum-free-disk limits
+- **🔒 Security** — optional API key to protect write operations
 
 ## 🌍 Subtitle Providers
 
