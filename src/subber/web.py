@@ -1023,7 +1023,6 @@ async def api_download_sub(file_id: str, request: Request, _=Depends(_require_wr
             "subdl": "SubDL",
             "addic7ed": "Addic7ed",
             "podnapisi": "Podnapisi",
-            "subscene": "Subscene",
             "embedded": "Embedded",
         }
         provider = registry.get(provider_name)

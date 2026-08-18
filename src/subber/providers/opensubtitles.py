@@ -61,7 +61,7 @@ class OpenSubtitlesProvider(SubtitleProvider):
         elif tier == "vip":
             self._daily_limit = 1000   # .org VIP = 1,000/day (hardcoded, no selection)
         elif tier == "dev":
-            self._daily_limit = 100    # Developer tier = 100/day (flag enabled on key)
+            self._daily_limit = 100    # "Under dev" consumer-key flag = 100/day
         elif tier == "lite":
             self._daily_limit = 2000   # Light plan = 2,000/day
         elif tier == "startup":

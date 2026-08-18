@@ -28,7 +28,7 @@ DEFAULTS = {
         "ffmpeg_path": "ffmpeg",
     },
     "providers": {
-        "enabled": ["embedded", "subdl", "addic7ed", "podnapisi", "subscene", "opensubtitles"],
+        "enabled": ["embedded", "subdl", "addic7ed", "podnapisi", "opensubtitles"],
         "subdl": {
             "api_key": "",
             "pro_mode": False,
@@ -46,7 +46,6 @@ DEFAULTS = {
             "tier": "free",
             "daily_limit": 0,
         },
-        "subscene": {},
         "podnapisi": {},
         "embedded": {},
     },
@@ -63,7 +62,7 @@ DEFAULTS = {
         "scan_interval_hours": 6,
         "dry_run_default": True,
         "providers": {
-            "enabled": ["embedded", "subdl", "addic7ed", "subscene"],
+            "enabled": ["embedded", "subdl", "addic7ed"],
             "addic7ed_proxy": "",
         },
     },
@@ -225,7 +224,6 @@ def build_provider_registry() -> "ProviderRegistry":
     from .providers.subdl import SubDLProvider
     from .providers.addic7ed import Addic7edProvider
     from .providers.podnapisi import PodnapisiProvider
-    from .providers.subscene import SubsceneProvider
     from .providers.opensubtitles import OpenSubtitlesProvider
 
     ps = providers_settings()
@@ -250,9 +248,6 @@ def build_provider_registry() -> "ProviderRegistry":
 
     if "podnapisi" in enabled:
         registry.add(PodnapisiProvider())
-
-    if "subscene" in enabled:
-        registry.add(SubsceneProvider())
 
     if "opensubtitles" in enabled:
         os_cfg = ps.get("opensubtitles", {})

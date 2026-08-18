@@ -230,9 +230,14 @@ async def run_scan(
 
     # files_processed is CUMULATIVE across resume runs (user preference):
     # it counts every completion attempt, matching how the stats panel counts
-    # files. Only the total for this run is refreshed; the processed counter
-    # keeps climbing so the numbers stay in line with each other.
-    library_db.update_scan(scan_id, files_total=len(records))
+    # files. files_total must stay the FULL-library total — on resume (skip_walk)
+    # `records` only holds the unprocessed remainder, so len(records) would be
+    # wrong (that's what made progress show 326%: 19008/5823). Use the DB count
+    # on resume; on a fresh walk, len(records) IS the full total.
+    if skip_walk:
+        library_db.update_scan(scan_id, files_total=library_db.get_total_file_count(media_types))
+    else:
+        library_db.update_scan(scan_id, files_total=len(records))
 
     if dry_run:
         # In dry-run mode, just upsert records with subtitle status but don't process
@@ -319,9 +324,12 @@ async def run_scan(
         "[scan %s] worker finished: %d processed, %d failed, cost=%.4f",
         scan_id, processed, failed, total_cost,
     )
+    # NOTE: do NOT set files_processed here. It is maintained CUMULATIVELY by
+    # increment_scan_progress() (files_processed = files_processed + 1 per file),
+    # so overwriting it with this run's local `processed` would clobber the
+    # all-time total on resume (the same class of bug as the files_total 326%).
     library_db.update_scan(
         scan_id,
-        files_processed=processed,
         files_failed=failed,
         translation_cost=total_cost,
         status="completed",

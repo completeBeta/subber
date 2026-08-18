@@ -167,10 +167,6 @@
                 Podnapisi (free)
             </label>
             <label class="checkbox-label">
-                <input type="checkbox" name="providers.subscene" id="cfg-prov-subscene" checked>
-                Subscene (free)
-            </label>
-            <label class="checkbox-label">
                 <input type="checkbox" name="providers.opensubtitles" id="cfg-prov-opensubtitles" checked>
                 OpenSubtitles (free 5/day, .org VIP 1,000/day, .com API packages)
             </label>
@@ -254,13 +250,17 @@
             <div class="form-group">
                 <label for="opensubtitles-tier">Plan</label>
                 <select id="opensubtitles-tier" name="providers.opensubtitles.tier">
-                    <option value="free">Free (5 downloads/day)</option>
-                    <option value="dev">Developer (100 downloads/day)</option>
-                    <option value="lite">Light (2,000 downloads/day)</option>
-                    <option value="startup">Startup (5,000 downloads/day)</option>
-                    <option value="basic">Basic (15,000 downloads/day)</option>
-                    <option value="premium">Premium (50,000 downloads/day)</option>
-                    <option value="pro">Pro (100,000 downloads/day)</option>
+                    <optgroup label="Consumer-key flags">
+                        <option value="free">Free — anonymous (5/day)</option>
+                        <option value="dev">Developer — "Under dev" flag (100/day)</option>
+                    </optgroup>
+                    <optgroup label="Paid API subscriptions">
+                        <option value="lite">Light — $20/mo (2,000/day)</option>
+                        <option value="startup">Startup — $50/mo (5,000/day)</option>
+                        <option value="basic">Basic — $100/mo (15,000/day)</option>
+                        <option value="premium">Premium — $200/mo (50,000/day)</option>
+                        <option value="pro">Pro — $400/mo (100,000/day)</option>
+                    </optgroup>
                 </select>
                 <div class="hint">Select the plan your API consumer key is subscribed to. Daily limit resets at midnight UTC.</div>
             </div>
@@ -444,7 +444,6 @@ async function loadSettings() {
         document.getElementById('cfg-prov-subdl').checked = prov.subdl !== false;
         document.getElementById('cfg-prov-addic7ed').checked = prov.addic7ed !== false;
         document.getElementById('cfg-prov-podnapisi').checked = prov.podnapisi !== false;
-        document.getElementById('cfg-prov-subscene').checked = prov.subscene !== false;
         document.getElementById('cfg-prov-opensubtitles').checked = prov.opensubtitles !== false;
                 document.getElementById('subdl-api-key').value = prov.subdl?.api_key || '';
         document.getElementById('subdl-pro-mode').checked = (cfg.providers?.subdl?.pro_mode) || false;
@@ -722,7 +721,6 @@ async function saveSettings() {
                 subdl: { api_key: document.getElementById('subdl-api-key').value, pro_mode: document.getElementById('subdl-pro-mode').checked },
                 addic7ed: { cookies: document.getElementById('addic7ed-cookies').value },
                 podnapisi: document.getElementById('cfg-prov-podnapisi').checked,
-                subscene: document.getElementById('cfg-prov-subscene').checked,
                 opensubtitles: buildOsPayload(),
                 
             }

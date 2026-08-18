@@ -409,6 +409,29 @@ def get_stale_in_progress(minutes: int = 30) -> list[dict]:
             conn.close()
 
 
+def get_total_file_count(media_types: list[str] | None = None) -> int:
+    """Return the total number of files in the library (optionally filtered).
+
+    Used to set scan_history.files_total correctly on resume — the resume path
+    only loads UNPROCESSED files, so len(records) would be the *remaining*
+    count, not the full-scan total. That mismatch made progress show 326%.
+    """
+    with _lock:
+        conn = _connect()
+        try:
+            if media_types:
+                placeholders = ",".join("?" * len(media_types))
+                row = conn.execute(
+                    f"SELECT COUNT(*) FROM library_files WHERE media_type IN ({placeholders})",
+                    list(media_types),
+                ).fetchone()
+            else:
+                row = conn.execute("SELECT COUNT(*) FROM library_files").fetchone()
+            return row[0] if row else 0
+        finally:
+            conn.close()
+
+
 # ── Stats ──
 
 def get_stats() -> dict:
