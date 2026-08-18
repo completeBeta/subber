@@ -13,6 +13,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 from . import library_db
@@ -279,6 +280,11 @@ async def run_scan(
     failed = 0
     total_cost = 0.0
     BATCH_SIZE = max(4, max_concurrent * 4)
+    logger.info(
+        "[scan %s] worker starting: %d files, batch=%d, concurrency=%d",
+        scan_id, len(records), BATCH_SIZE, max_concurrent,
+    )
+    last_heartbeat = time.monotonic()
     try:
         for i in range(0, len(records), BATCH_SIZE):
             if _is_cancelled(scan_id):
@@ -296,9 +302,23 @@ async def run_scan(
                     processed += 1
                     if isinstance(r, dict):
                         total_cost += float(r.get("cost", 0) or 0.0)
+            # Heartbeat: log progress every 60s (or every batch if slow) so a
+            # stall is distinguishable from healthy idling — and so we can see
+            # WHERE it stopped (last heartbeat = last batch that completed).
+            now = time.monotonic()
+            if now - last_heartbeat >= 60:
+                logger.info(
+                    "[scan %s] heartbeat: %d/%d done, %d failed, cost=%.4f",
+                    scan_id, processed + failed, len(records), failed, total_cost,
+                )
+                last_heartbeat = now
     finally:
         await _close_library_registry()
 
+    logger.info(
+        "[scan %s] worker finished: %d processed, %d failed, cost=%.4f",
+        scan_id, processed, failed, total_cost,
+    )
     library_db.update_scan(
         scan_id,
         files_processed=processed,

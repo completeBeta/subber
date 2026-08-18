@@ -29,6 +29,7 @@ from .types import BatchJob, JobStatus, TranslationJob
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 TEMPLATES_DIR = BASE_DIR / "templates"
 _LOG_FILE = Path("/app/data/subber.log")
+_LIFECYCLE_FILE = Path("/app/data/lifecycle.jsonl")
 STATIC_DIR = BASE_DIR / "static"
 UPLOAD_DIR = Path(os.environ.get("SUBBER_UPLOAD_DIR", BASE_DIR / "uploads"))
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -2714,6 +2715,37 @@ async def api_logs_diagnostics(_=Depends(_require_write_auth)):
             pass
     bundle["recent_errors_warnings"] = errors
 
+    # Lifecycle history: restarts + last shutdown reason (the thing that was
+    # invisible during the 07:53 incident — we couldn't tell WHY it restarted).
+    try:
+        events = _read_lifecycle_history()
+        boots = [e for e in events if e.get("kind") == "boot"]
+        shutdowns = [e for e in events if e.get("kind") == "shutdown"]
+        bundle["lifecycle"] = {
+            "boot_count": len(boots),
+            "last_boot": boots[-1].get("ts") if boots else None,
+            "last_shutdown": shutdowns[-1].get("ts") if shutdowns else None,
+            "shutdown_count": len(shutdowns),
+            # A boot with no preceding shutdown = hard kill (OOM/SIGKILL/crash)
+            "last_event_was_boot_without_shutdown": bool(boots) and (
+                not shutdowns or boots[-1].get("ts") > shutdowns[-1].get("ts")
+            ),
+            "recent_events": events[-20:],
+        }
+    except Exception as e:
+        bundle["lifecycle_error"] = str(e)
+
+    # Hung-file history: any files currently stuck 'in_progress' > 30 min
+    try:
+        stale = library_db.get_stale_in_progress(minutes=30)
+        bundle["hung_files"] = [
+            {"id": s.get("id"), "minutes_stale": s.get("minutes_stale"),
+             "path": _redact_line(str(s.get("file_path", "?")))}
+            for s in (stale or [])
+        ][:20]
+    except Exception as e:
+        bundle["hung_files_error"] = str(e)
+
     return JSONResponse(content=bundle)
 
 
@@ -2747,6 +2779,45 @@ async def api_logs_stats():
     })
 
 
+def _record_lifecycle_event(kind: str) -> None:
+    """Append a boot/shutdown event to the lifecycle history file.
+
+    JSON-lines, so the diagnostics bundle can count restarts and show the last
+    shutdown reason without parsing the rotated log files.
+    """
+    import json as _json
+    from datetime import datetime as _dt, timezone as _tz
+    _LIFECYCLE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    event = {
+        "ts": _dt.now(_tz.utc).isoformat(),
+        "kind": kind,
+        "pid": os.getpid(),
+    }
+    with open(_LIFECYCLE_FILE, "a", encoding="utf-8") as f:
+        f.write(_json.dumps(event) + "\n")
+
+
+def _read_lifecycle_history() -> list[dict]:
+    """Read the lifecycle history file (newest last). Returns [] if absent."""
+    import json as _json
+    if not _LIFECYCLE_FILE.exists():
+        return []
+    events = []
+    try:
+        with open(_LIFECYCLE_FILE, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    events.append(_json.loads(line))
+                except Exception:
+                    continue
+    except OSError:
+        return []
+    return events
+
+
 @app.on_event("startup")
 async def startup():
     # Set up file logging — daily rotation, 45-day retention.
@@ -2766,9 +2837,49 @@ async def startup():
     root_logger.setLevel(logging.DEBUG)
     _log.info("File logging started (daily rotation, 45d retention): %s", _LOG_FILE)
 
+    # Record boot in the shutdown-history file so restarts are countable and
+    # the diagnostics bundle can show "N boots, last shutdown reason=X".
+    try:
+        _record_lifecycle_event("boot")
+    except Exception as e:
+        _log.warning("Could not record boot event: %s", e)
+
     _load_grab_state()
     asyncio.create_task(_cleanup_expired())
     asyncio.create_task(_stale_in_progress_watchdog())
+
+
+@app.on_event("shutdown")
+async def _log_shutdown() -> None:
+    """Log shutdown + dump active asyncio tasks.
+
+    A graceful shutdown (SIGTERM/SIGINT → uvicorn exit) lands here and leaves a
+    trail; an OOM-kill or SIGKILL does NOT — so the ABSENCE of this line plus a
+    fresh "File logging started" on restart is itself the diagnostic signal for
+    a hard kill. The task dump shows what was running (e.g. a stuck scan task)
+    and where it was awaiting.
+    """
+    try:
+        _log.warning("Application shutting down (graceful) — dumping active asyncio tasks")
+        for t in asyncio.all_tasks():
+            if t is asyncio.current_task():
+                continue
+            stack = ""
+            try:
+                frames = t.get_stack()
+                if frames:
+                    stack = " | " + " <- ".join(
+                        f"{f.f_code.co_name}:{f.f_lineno}" for f in frames[:8]
+                    )
+            except Exception:
+                pass
+            _log.warning("  active task: %s%s", t.get_name(), stack)
+    except Exception as e:
+        _log.warning("Shutdown logging error: %s", e)
+    try:
+        _record_lifecycle_event("shutdown")
+    except Exception:
+        pass
 
 
 async def _stale_in_progress_watchdog() -> None:
@@ -2784,6 +2895,17 @@ async def _stale_in_progress_watchdog() -> None:
         await asyncio.sleep(60)
         try:
             from . import library_db
+            # Log WHICH files are hung (and for how long) before resetting —
+            # previously only a count was logged, which gave no clue about
+            # what file/provider caused the stall.
+            stale = library_db.get_stale_in_progress(minutes=30)
+            if stale:
+                for s in stale:
+                    _log.warning(
+                        "Stale-progress watchdog: file_id=%s hung %s min — %s",
+                        s.get("id"), s.get("minutes_stale"),
+                        sanitize_log(s.get("file_path", "?")),
+                    )
             reset = library_db.mark_stale_in_progress(minutes=30)
             if reset:
                 _log.warning("Stale-progress watchdog: reset %d hung in_progress file(s)", reset)

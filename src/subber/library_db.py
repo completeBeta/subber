@@ -385,6 +385,30 @@ def mark_stale_in_progress(minutes: int | None = None) -> int:
             conn.close()
 
 
+def get_stale_in_progress(minutes: int = 30) -> list[dict]:
+    """Return rows stuck 'in_progress' for longer than `minutes`.
+
+    Used by the watchdog to log WHICH files hung and for how long before
+    resetting them — the previous code only returned a count, so a stall
+    gave no clue about what file (or provider) was responsible.
+    """
+    with _lock:
+        conn = _connect()
+        try:
+            rows = conn.execute(
+                """SELECT id, file_path, status, updated_at,
+                          CAST((julianday('now') - julianday(updated_at)) * 1440 AS INTEGER) AS minutes_stale
+                   FROM library_files
+                   WHERE status = 'in_progress'
+                     AND updated_at < datetime('now', ?)
+                   ORDER BY updated_at ASC""",
+                (f"-{minutes} minutes",),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+
 # ── Stats ──
 
 def get_stats() -> dict:
