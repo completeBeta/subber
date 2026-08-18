@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -24,6 +25,32 @@ _logger = logging.getLogger("subber.providers")
 #   Free: 50 downloads/day (2,000 searches/day)
 #   PRO:  2,000 downloads/day (30,000 searches/day)
 DOWNLOAD_LIMITS = {"free": 50, "pro": 2000}
+
+
+def _strip_api_key(url: str) -> str:
+    """Remove the `api_key` query param from a SubDL URL.
+
+    SubDL returns download URLs with `?api_key=...` already embedded. We strip
+    it so the raw key never ends up in search-response metadata that gets sent
+    to the browser. The download() path re-appends the provider's own key.
+    """
+    parts = urllib.parse.urlsplit(url)
+    q = urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
+    q = [(k, v) for k, v in q if k.lower() != "api_key"]
+    query = urllib.parse.urlencode(q)
+    return urllib.parse.urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
+
+
+def _with_api_key(url: str, api_key: str) -> str:
+    """Append the api_key query param to a SubDL URL (idempotent)."""
+    if not api_key:
+        return url
+    parts = urllib.parse.urlsplit(url)
+    q = urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
+    q = [(k, v) for k, v in q if k.lower() != "api_key"]
+    q.append(("api_key", api_key))
+    query = urllib.parse.urlencode(q)
+    return urllib.parse.urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
 
 
 class SubDLProvider(SubtitleProvider):
@@ -161,8 +188,11 @@ class SubDLProvider(SubtitleProvider):
             if not dl_url:
                 raise ValueError(f"No download URL for SubDL subtitle {sd_id}")
 
-        # Download the actual file
+        # Download the actual file. dl_url has its api_key stripped (to avoid
+        # leaking the key in search responses) — re-append the provider's key
+        # here so the download still authenticates.
         if not dl_url.startswith("http"): dl_url = f"{DL_BASE}{dl_url}"
+        dl_url = _with_api_key(dl_url, self._api_key)
         dl_resp = await self._client.get(dl_url)
         dl_resp.raise_for_status()
 
@@ -196,6 +226,11 @@ class SubDLProvider(SubtitleProvider):
             filename = r.get("name", "unknown")
             sd_id = r.get("sd_id") or r.get("subtitle_id")
             dl_url = r.get("url")
+            # SubDL returns the download URL with `?api_key=...` already
+            # embedded. Strip it so the key never leaks into search responses
+            # (the download() method re-appends it from the provider's own key).
+            if dl_url:
+                dl_url = _strip_api_key(dl_url)
             results.append(SubtitleResult(
                 id=f"subdl_{sd_id}",
                 filename=filename if filename.endswith((".srt", ".ass")) else f"{filename}.srt",
@@ -205,6 +240,6 @@ class SubDLProvider(SubtitleProvider):
                 rating=float(r.get("rating", 0)),
                 hearing_impaired=r.get("hi", False),
                 release_info=r.get("release_name", ""),
-                metadata={"sd_id": sd_id, "dl_url": r.get("url")},
+                metadata={"sd_id": sd_id, "dl_url": dl_url},
             ))
         return results

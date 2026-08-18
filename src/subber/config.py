@@ -59,7 +59,6 @@ DEFAULTS = {
         "dry_run_default": True,
         "providers": {
             "enabled": ["embedded", "subdl", "gestdown"],
-            "addic7ed_proxy": "",
         },
     },
 
