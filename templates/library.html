@@ -8,9 +8,9 @@
         Scan your media library and ensure every video has synced English subtitles.
     </p>
 
-    <!-- SubDL quota banner (downloads/day — the real limit, not API requests) -->
+    <!-- Paid-subscriptions banner (shown when SubDL PRO or OpenSubtitles paid tier is active) -->
     <div id="pro-mode-banner" style="display: none; background: #f59e0b; color: #000; padding: 0.6rem 1rem; border-radius: 6px; margin-bottom: 1rem; font-weight: 600; text-align: center;">
-        <span id="subdl-quota-text">SubDL: checking download quota...</span>
+        <span id="subdl-quota-text">Paid Subtitles Subscriptions Enabled</span>
     </div>
 
     <!-- Status Bar -->
@@ -843,27 +843,47 @@ async function retryFile(fileId) {
 }
 
 
-// Check SubDL download-quota status (downloads/day — free: 50, PRO: 2,000).
-// Synced from SubDL's /api/v2/me, not the raw API request counter.
+// Check paid-subscription status (SubDL PRO or OpenSubtitles Light+/VIP) and
+// render the banner summary. Quota detail still comes from /api/providers/subdl/usage.
 async function checkProMode() {
     const banner = document.getElementById("pro-mode-banner");
     if (!banner) return;
     try {
-        const resp = await fetch("/api/providers/subdl/usage");
+        const resp = await fetch("/api/providers/paid-status");
         if (!resp.ok) { banner.style.display = "none"; return; }
         const data = await resp.json();
-        if (data.error) { banner.style.display = "none"; return; }
-        const used = data.downloads_used_today || 0;
-        const limit = data.daily_limit || 0;
-        const remaining = data.remaining || 0;
-        const planLabel = data.plan === "pro" ? "PRO" : "Free";
-        document.getElementById("subdl-quota-text").textContent =
-            `SubDL (${planLabel}): ${used} / ${limit} downloads used today — ${remaining} remaining`;
-        banner.style.background = remaining <= Math.ceil(limit * 0.1) ? "#dc2626" : "#f59e0b";
-        banner.style.color = remaining <= Math.ceil(limit * 0.1) ? "#fff" : "#000";
+        if (!data.paid) { banner.style.display = "none"; return; }
+
+        // Build a human-readable summary of which paid sources are active.
+        const parts = [];
+        if (data.subdl && data.subdl.pro) parts.push("SubDL PRO");
+        if (data.opensubtitles && data.opensubtitles.paid) {
+            const tier = (data.opensubtitles.tier || "").toLowerCase();
+            const label = tier === "vip" ? "OpenSubtitles VIP" : `OpenSubtitles ${tier.charAt(0).toUpperCase()}${tier.slice(1)}`;
+            parts.push(label);
+        }
+        const summary = "Paid Subtitles Subscriptions Enabled — " + parts.join(" + ");
+
+        // Append SubDL download quota if available (best-effort).
+        try {
+            const u = await fetch("/api/providers/subdl/usage");
+            if (u.ok) {
+                const ud = await u.json();
+                if (!ud.error && ud.daily_limit) {
+                    document.getElementById("subdl-quota-text").textContent =
+                        `${summary} — SubDL ${ud.downloads_used_today || 0}/${ud.daily_limit} downloads today`;
+                    banner.style.background = (ud.remaining || 0) <= Math.ceil((ud.daily_limit || 1) * 0.1) ? "#dc2626" : "#f59e0b";
+                    banner.style.color = (ud.remaining || 0) <= Math.ceil((ud.daily_limit || 1) * 0.1) ? "#fff" : "#000";
+                    banner.style.display = "block";
+                    return;
+                }
+            }
+        } catch (_) { /* quota detail is optional */ }
+
+        document.getElementById("subdl-quota-text").textContent = summary;
         banner.style.display = "block";
     } catch (e) {
-        console.error("SubDL quota check error:", e);
+        console.error("Paid-status check error:", e);
     }
 }
 checkProMode();

@@ -112,7 +112,14 @@ class ProviderRegistry:
                 if isinstance(res, list):
                     all_results.extend(res)
 
-        return _merge_results(all_results)
+        all_results = _merge_results(all_results)
+        # Relevance filter on name search: drop clearly-unrelated fuzzy matches
+        # (e.g. searching "demon lord" returning a Marvel one-shot). Only applies
+        # when we have a text query AND some results look relevant — if nothing
+        # matches, keep everything rather than return empty (avoid false-empty).
+        if query and not (video_path and video_path.is_file()):
+            all_results = _filter_relevance(query, all_results)
+        return all_results
 
     async def download(
         self, result: SubtitleResult, output_dir: Path,
@@ -159,3 +166,47 @@ def _normalize(filename: str) -> str:
     base = filename.rsplit(".", 1)[0].lower() if "." in filename else filename.lower()
     base = re.sub(r"[._\- ]+", " ", base).strip()
     return base
+
+
+def _filter_relevance(query: str, results: list[SubtitleResult]) -> list[SubtitleResult]:
+    """Drop clearly-unrelated name-search results, conservatively.
+
+    A fuzzy provider match can return something completely unrelated to the
+    query (e.g. "demon lord" → a Marvel one-shot). We tokenize the query and
+    each result's filename/release, then:
+      - if NO result shares a meaningful token with the query, keep everything
+        (better a wrong result than an empty page — the user can see nothing matched),
+      - otherwise drop the results that share no token.
+
+    "Meaningful" = a token of length >= 3 that isn't a stopword, so "way" or
+    "the" don't cause a false match.
+    """
+    import re
+
+    _STOP = {
+        "the", "and", "for", "not", "you", "are", "with", "that", "this",
+        "from", "have", "was", "were", "will", "can", "are", "get", "got",
+        "all", "but", "out", "our", "who", "what", "when", "how", "way",
+        "one", "two", "episode", "season", "movie", "1080p", "720p", "2160p",
+    }
+
+    def tokens(s: str) -> set[str]:
+        return {
+            t for t in re.split(r"[^a-z0-9]+", s.lower())
+            if len(t) >= 3 and t not in _STOP
+        }
+
+    q_tokens = tokens(query)
+    if not q_tokens:
+        return results
+
+    # Relevance = how many query tokens appear in the result.
+    def score(r: SubtitleResult) -> int:
+        r_tokens = tokens(r.filename) | tokens(r.release_info or "")
+        return len(q_tokens & r_tokens)
+
+    scored = [(score(r), r) for r in results]
+    if not any(s > 0 for s, _ in scored):
+        return results  # nothing matches — keep everything (avoid false-empty)
+
+    return [r for s, r in scored if s > 0]

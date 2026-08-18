@@ -1021,7 +1021,7 @@ async def api_download_sub(file_id: str, request: Request, _=Depends(_require_wr
             "os": "OpenSubtitles",
             "opensubtitles": "OpenSubtitles",
             "subdl": "SubDL",
-            "addic7ed": "Addic7ed",
+            "gestdown": "Gestdown",
             "podnapisi": "Podnapisi",
             "embedded": "Embedded",
         }
@@ -1834,6 +1834,66 @@ async def library_page(request: Request):
         headers=_NO_CACHE_HEADERS,
     )
 
+async def _launch_library_scan(
+    scan_type: str = "full",
+    paths: list[str] | None = None,
+    dry_run: bool = False,
+    media_types: list[str] | None = None,
+) -> int:
+    """Start a library scan in the background. Returns scan_id.
+
+    Shared by the /api/library/scan endpoint and the auto-scan scheduler.
+    Raises RuntimeError if a scan is already active or paused.
+    """
+    active = _libdb.get_active_scan()
+    if active:
+        raise RuntimeError(
+            f"Scan {active['id']} is already "
+            f"{'running' if active.get('status') == 'running' else 'paused'}."
+        )
+
+    lib_cfg = _subber_config.get_section("library")
+    max_concurrent = lib_cfg.get("max_concurrent", 2)
+    drift_threshold = lib_cfg.get("drift_threshold_ms", 200)
+
+    _libdb.init_db()
+
+    # Auto-backup before every scan (best effort — never blocks scanning).
+    try:
+        bk = _libdb.create_backup(kind="auto")
+        print(f"[LIBRARY] Auto-backup before scan {scan_type}: {bk['name']} ({bk['size']} bytes)", flush=True)
+    except Exception as e:
+        print(f"[LIBRARY] Auto-backup failed (scan continues): {e}", flush=True)
+
+    scan_id = _libdb.create_scan(scan_type)
+    _lib_active_scans[scan_id] = {"status": "running", "files_total": 0, "files_processed": 0}
+
+    async def _run_scan():
+        async with _lib_scan_lock:
+            try:
+                await _libpipe.run_scan(
+                    scan_id=scan_id,
+                    scan_type=scan_type,
+                    paths=paths,
+                    dry_run=dry_run,
+                    media_types=media_types,
+                    max_concurrent=max_concurrent,
+                    drift_threshold_ms=drift_threshold,
+                )
+                cur = _libdb.get_scan(scan_id)
+                if cur and cur.get("status") == "paused":
+                    _lib_active_scans[scan_id] = {"status": "paused", **_lib_active_scans.get(scan_id, {})}
+                else:
+                    _lib_active_scans[scan_id] = {"status": "completed", **_lib_active_scans.get(scan_id, {})}
+            except Exception as e:
+                _lib_active_scans[scan_id] = {"status": "failed", "error": str(e)}
+                _libdb.update_scan(scan_id, status="failed", error_message=str(e))
+
+    task = asyncio.create_task(_run_scan())
+    _lib_active_scans[scan_id]["task"] = task
+    return scan_id
+
+
 @app.post("/api/library/scan")
 async def api_library_scan(request: Request, _=Depends(_require_write_auth)):
     """Start a library scan. Returns scan_id immediately."""
@@ -1847,62 +1907,48 @@ async def api_library_scan(request: Request, _=Depends(_require_write_auth)):
     dry_run = body.get("dry_run", False)
     media_types = body.get("media_types")
 
-    # Don't start a second scan while one is already active (DB-backed check —
-    # a running scan row means a task is live; prevents duplicate concurrent scans)
-    active = _libdb.get_active_scan()
-    if active:
-        return JSONResponse(
-            content={"error": f"Scan {active['id']} is already {'running' if active.get('status') == 'running' else 'paused'}. Pause or cancel it first."},
-            status_code=409,
-        )
-
-    # Get config for max_concurrent and drift threshold
-    lib_cfg = _subber_config.get_section("library")
-    max_concurrent = lib_cfg.get("max_concurrent", 2)
-    drift_threshold = lib_cfg.get("drift_threshold_ms", 200)
-
-    # Initialize DB
-    _libdb.init_db()
-
-    # Auto-backup before every scan (best effort — a failed backup must never
-    # block scanning). Rotation keeps the newest 5 auto/manual backups.
     try:
-        bk = _libdb.create_backup(kind="auto")
-        print(f"[LIBRARY] Auto-backup before scan {scan_type}: {bk['name']} ({bk['size']} bytes)", flush=True)
-    except Exception as e:
-        print(f"[LIBRARY] Auto-backup failed (scan continues): {e}", flush=True)
-
-    # Create scan record
-    scan_id = _libdb.create_scan(scan_type)
-    _lib_active_scans[scan_id] = {"status": "running", "files_total": 0, "files_processed": 0}
-
-    # Start scan in background
-    async def _run_scan():
-        async with _lib_scan_lock:
-            try:
-                await _libpipe.run_scan(
-                    scan_id=scan_id,
-                    scan_type=scan_type,
-                    paths=paths,
-                    dry_run=dry_run,
-                    media_types=media_types,
-                    max_concurrent=max_concurrent,
-                    drift_threshold_ms=drift_threshold,
-                )
-                # If paused/cancelled during run, reflect that; else completed
-                cur = _libdb.get_scan(scan_id)
-                if cur and cur.get("status") == "paused":
-                    _lib_active_scans[scan_id] = {"status": "paused", **_lib_active_scans.get(scan_id, {})}
-                else:
-                    _lib_active_scans[scan_id] = {"status": "completed", **_lib_active_scans.get(scan_id, {})}
-            except Exception as e:
-                _lib_active_scans[scan_id] = {"status": "failed", "error": str(e)}
-                _libdb.update_scan(scan_id, status="failed", error_message=str(e))
-
-    task = asyncio.create_task(_run_scan())
-    _lib_active_scans[scan_id]["task"] = task
+        scan_id = await _launch_library_scan(scan_type, paths, dry_run, media_types)
+    except RuntimeError as e:
+        return JSONResponse(content={"error": str(e)}, status_code=409)
 
     return JSONResponse(content={"scan_id": scan_id})
+
+
+async def _auto_scan_scheduler() -> None:
+    """Periodically trigger a scan when `library.scan_interval_hours` is set.
+
+    The interval was previously stored-only (no scheduler consumed it), so
+    auto-scan silently did nothing. This loop:
+      - checks config every 10 minutes,
+      - skips if interval is 0 (manual) or a scan is already active/paused,
+      - triggers a full scan when the configured interval has elapsed.
+    """
+    _last_auto_scan = time.monotonic()  # don't fire immediately on startup
+    while True:
+        await asyncio.sleep(600)  # check every 10 min
+        try:
+            lib_cfg = _subber_config.get_section("library")
+            interval_hours = int(lib_cfg.get("scan_interval_hours", 0) or 0)
+            if interval_hours <= 0:
+                _last_auto_scan = time.monotonic()  # reset timer while disabled
+                continue
+
+            # Never overlap a manual/paused scan.
+            active = _libdb.get_active_scan()
+            if active:
+                continue
+
+            elapsed = time.monotonic() - _last_auto_scan
+            if elapsed < interval_hours * 3600:
+                continue
+
+            _log.info("Auto-scan scheduler: interval %dh elapsed — starting full scan", interval_hours)
+            scan_id = await _launch_library_scan("full")
+            _last_auto_scan = time.monotonic()
+            _log.info("Auto-scan scheduler: started scan %d", scan_id)
+        except Exception as e:
+            _log.warning("Auto-scan scheduler error: %s", e)
 
 @app.get("/api/library/scan/{scan_id}")
 async def api_library_scan_status(scan_id: str):
@@ -2493,6 +2539,35 @@ async def api_subdl_usage():
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
+@app.get("/api/providers/paid-status")
+async def api_paid_status():
+    """Combined paid-subscription status for the library banner.
+
+    A "paid" flag is shown when the user has ANY paid subtitle source:
+      - SubDL in PRO mode, OR
+      - OpenSubtitles on a paid tier (Light or higher), OR
+      - OpenSubtitles in VIP tier.
+    Returns both the flag and the per-provider breakdown so the banner can
+    render a human-readable summary.
+    """
+    ps = _subber_config.providers_settings()
+
+    subdl_cfg = ps.get("subdl", {})
+    subdl_pro = bool(subdl_cfg.get("pro_mode"))
+
+    os_cfg = ps.get("opensubtitles", {})
+    os_tier = (os_cfg.get("tier") or "free").lower()
+    # Paid tiers = Light or higher, plus VIP (which is a paid .org subscription).
+    _OS_PAID_TIERS = {"lite", "startup", "basic", "premium", "pro", "vip"}
+    os_paid = os_tier in _OS_PAID_TIERS
+
+    return JSONResponse(content={
+        "paid": subdl_pro or os_paid,
+        "subdl": {"pro": subdl_pro},
+        "opensubtitles": {"tier": os_tier, "paid": os_paid},
+    })
+
+
 @app.get("/api/providers/opensubtitles/usage")
 async def api_opensubtitles_usage():
     """Get current OpenSubtitles usage stats."""
@@ -2846,6 +2921,7 @@ async def startup():
     _load_grab_state()
     asyncio.create_task(_cleanup_expired())
     asyncio.create_task(_stale_in_progress_watchdog())
+    asyncio.create_task(_auto_scan_scheduler())
 
 
 @app.on_event("shutdown")

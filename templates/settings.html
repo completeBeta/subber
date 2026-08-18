@@ -159,8 +159,8 @@
                 SubDL (free API)
             </label>
             <label class="checkbox-label">
-                <input type="checkbox" name="providers.addic7ed" id="cfg-prov-addic7ed" checked>
-                Addic7ed (TV, free)
+                <input type="checkbox" name="providers.gestdown" id="cfg-prov-gestdown" checked>
+                Gestdown (TV, free — Addic7ed proxy)
             </label>
             <label class="checkbox-label">
                 <input type="checkbox" name="providers.podnapisi" id="cfg-prov-podnapisi" checked>
@@ -222,18 +222,18 @@
             <div class="form-group" style="margin-top: 0.3rem;">
                 <label for="opensubtitles-vip-api-key">API Key (VIP consumer)</label>
                 <input type="text" id="opensubtitles-vip-api-key" name="providers.opensubtitles.vip_api_key"
-                       placeholder="API key used with your VIP login">
+                       placeholder="API key used with your VIP login" autocomplete="off">
                 <div class="hint">The REST API requires an Api-Key header even for VIP users. Create a consumer key at <a href="https://www.opensubtitles.com/en/consumers" target="_blank" style="color: var(--accent);">opensubtitles.com/consumers</a> — this box is stored separately and never touches the .com API key below.</div>
             </div>
             <div class="form-group">
                 <label for="opensubtitles-username">Username</label>
                 <input type="text" id="opensubtitles-username" name="providers.opensubtitles.username"
-                       placeholder="Your opensubtitles.org username">
+                       placeholder="Your opensubtitles.org username" autocomplete="off">
             </div>
             <div class="form-group">
                 <label for="opensubtitles-password">Password</label>
                 <input type="password" id="opensubtitles-password" name="providers.opensubtitles.password"
-                       placeholder="Your opensubtitles.org password">
+                       placeholder="Your opensubtitles.org password" autocomplete="new-password">
             </div>
             <div class="hint">VIP members at <a href="https://www.opensubtitles.org" target="_blank" style="color: var(--accent);">opensubtitles.org</a> get 1,000 downloads/day — the cap is automatic, no plan selection needed.</div>
         </div>
@@ -244,7 +244,7 @@
             <div class="form-group" style="margin-top: 0.3rem;">
                 <label for="opensubtitles-api-key">API Key</label>
                 <input type="text" id="opensubtitles-api-key" name="providers.opensubtitles.api_key"
-                       placeholder="Your OpenSubtitles.com consumer API key">
+                       placeholder="Your OpenSubtitles.com consumer API key" autocomplete="off">
                 <div class="hint">Get one at <a href="https://www.opensubtitles.com/en/consumers" target="_blank" style="color: var(--accent);">opensubtitles.com/consumers</a></div>
             </div>
             <div class="form-group">
@@ -272,12 +272,6 @@
 
         <hr style="border-color: var(--border); margin: 1rem 0;">
 
-        <div class="form-group">
-            <label for="addic7ed-cookies">Addic7ed Cookies</label>
-            <input type="text" id="addic7ed-cookies" name="providers.addic7ed.cookies"
-                   placeholder="PHPSESSID=abc; wikisubtitlesuser=xyz; wikisubtitlespass=efg">
-            <div class="hint">Login at addic7ed.com, copy cookies from browser dev tools. Best for TV shows.</div>
-        </div>
     </div>
 
     <!-- Caution Zone -->
@@ -331,6 +325,9 @@
                 <option value="6">Every 6 hours</option>
                 <option value="12">Every 12 hours</option>
                 <option value="24">Every 24 hours</option>
+                <option value="168">Every week</option>
+                <option value="336">Every fortnight</option>
+                <option value="720">Every month</option>
             </select>
         </div>
         <div class="form-group">
@@ -442,7 +439,7 @@ async function loadSettings() {
         const prov = cfg.providers || {};
         document.getElementById('cfg-prov-embedded').checked = prov.embedded !== false;
         document.getElementById('cfg-prov-subdl').checked = prov.subdl !== false;
-        document.getElementById('cfg-prov-addic7ed').checked = prov.addic7ed !== false;
+        document.getElementById('cfg-prov-gestdown').checked = prov.gestdown !== false;
         document.getElementById('cfg-prov-podnapisi').checked = prov.podnapisi !== false;
         document.getElementById('cfg-prov-opensubtitles').checked = prov.opensubtitles !== false;
                 document.getElementById('subdl-api-key').value = prov.subdl?.api_key || '';
@@ -462,7 +459,6 @@ async function loadSettings() {
         document.querySelector(`input[name="os-mode"][value="${osMode}"]`).checked = true;
         setOsMode(osMode);
         loadOpenSubtitlesUsage();
-        document.getElementById('addic7ed-cookies').value = prov.addic7ed?.cookies || '';
         // Library settings
         if (cfg.library) {
             // Library paths auto-derived from Mounts
@@ -719,7 +715,7 @@ async function saveSettings() {
             values: {
                 embedded: document.getElementById('cfg-prov-embedded').checked,
                 subdl: { api_key: document.getElementById('subdl-api-key').value, pro_mode: document.getElementById('subdl-pro-mode').checked },
-                addic7ed: { cookies: document.getElementById('addic7ed-cookies').value },
+                gestdown: document.getElementById('cfg-prov-gestdown').checked,
                 podnapisi: document.getElementById('cfg-prov-podnapisi').checked,
                 opensubtitles: buildOsPayload(),
                 

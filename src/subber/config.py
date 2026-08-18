@@ -28,16 +28,12 @@ DEFAULTS = {
         "ffmpeg_path": "ffmpeg",
     },
     "providers": {
-        "enabled": ["embedded", "subdl", "addic7ed", "podnapisi", "opensubtitles"],
+        "enabled": ["embedded", "subdl", "gestdown", "podnapisi", "opensubtitles"],
         "subdl": {
             "api_key": "",
             "pro_mode": False,
         },
-        "addic7ed": {
-            "username": "",
-            "password": "",
-            "cookies": "",
-        },
+        "gestdown": {},
         "opensubtitles": {
             "api_key": "",
             "vip_api_key": "",
@@ -62,7 +58,7 @@ DEFAULTS = {
         "scan_interval_hours": 6,
         "dry_run_default": True,
         "providers": {
-            "enabled": ["embedded", "subdl", "addic7ed"],
+            "enabled": ["embedded", "subdl", "gestdown"],
             "addic7ed_proxy": "",
         },
     },
@@ -149,7 +145,7 @@ def update(section: str, values: dict) -> dict:
         raise KeyError(f"Unknown config section: {section}")
     # Strip orphaned flat keys when nested keys are provided
     if section == "providers":
-        for nested_key in ("subdl", "addic7ed", "opensubtitles"):
+        for nested_key in ("subdl", "gestdown", "opensubtitles"):
             if nested_key in values:
                 providers = cfg.get("providers", {})
                 providers.pop(f"{nested_key}_api_key", None)
@@ -222,7 +218,7 @@ def build_provider_registry() -> "ProviderRegistry":
     from .providers import ProviderRegistry
     from .providers.embedded import EmbeddedProvider
     from .providers.subdl import SubDLProvider
-    from .providers.addic7ed import Addic7edProvider
+    from .providers.gestdown import GestdownProvider
     from .providers.podnapisi import PodnapisiProvider
     from .providers.opensubtitles import OpenSubtitlesProvider
 
@@ -238,13 +234,8 @@ def build_provider_registry() -> "ProviderRegistry":
         key = subdl_cfg.get("api_key", "") or os.environ.get("SUBDL_API_KEY", "")
         registry.add(SubDLProvider(api_key=key, pro_mode=subdl_cfg.get("pro_mode", False)))
 
-    if "addic7ed" in enabled:
-        addi_cfg = ps.get("addic7ed", {})
-        registry.add(Addic7edProvider(
-            username=addi_cfg.get("username", ""),
-            password=addi_cfg.get("password", ""),
-            cookies=addi_cfg.get("cookies", ""),
-        ))
+    if "gestdown" in enabled:
+        registry.add(GestdownProvider())
 
     if "podnapisi" in enabled:
         registry.add(PodnapisiProvider())

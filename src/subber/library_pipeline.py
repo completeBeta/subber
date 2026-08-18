@@ -447,17 +447,50 @@ async def _process_file(record: dict, scan_id: int, drift_threshold_ms: int) -> 
             )
 
         elif sub_status == "embedded_en":
-            # Has English embedded track — extract and optionally sync
+            # Has English embedded track — extract and optionally sync.
+            # First verify the track actually contains spoken dialogue: some
+            # fansub releases embed a "signs/songs only" track (OP/ED lyrics,
+            # on-screen text, spell effects) with zero dialogue. Those would
+            # otherwise be extracted and marked done, leaving the user with a
+            # subtitle that never matches the audio.
             extract_result = await _extract_embedded_sub(file_path, "en")
             if extract_result:
                 sub_path = extract_result[0]
-                action, drift = await _check_and_sync(file_path, "embedded_en", drift_threshold_ms, sub_path)
-                library_db.update_file_status(
-                    file_id, status="done", action_taken=action,
-                    sync_drift_ms=drift, subtitle_path=str(sub_path),
-                    provider_used="embedded",
-                    subtitle_languages=["en"],
-                )
+                if not _has_usable_dialogue(sub_path):
+                    logger.warning(
+                        "[scan %s] embedded_en track has no dialogue (signs/songs-only) for %s — falling back to providers",
+                        scan_id, sanitize_log(file_path.name),
+                    )
+                    # Remove the useless extracted file so it doesn't block future runs.
+                    try:
+                        sub_path.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                    provider_result = await _search_download_and_process(file_path, record, drift_threshold_ms)
+                    if provider_result.get("success"):
+                        cost = provider_result.get("cost", 0)
+                        library_db.update_file_status(
+                            file_id, status="done",
+                            action_taken=provider_result.get("action", "downloaded"),
+                            subtitle_path=provider_result.get("output_path"),
+                            provider_used=provider_result.get("provider"),
+                            sync_drift_ms=provider_result.get("drift_ms"),
+                            translation_cost=cost,
+                            subtitle_languages=["en"],
+                        )
+                    else:
+                        library_db.update_file_status(
+                            file_id, status="failed",
+                            error_message="Embedded English track has no dialogue and providers found nothing",
+                        )
+                else:
+                    action, drift = await _check_and_sync(file_path, "embedded_en", drift_threshold_ms, sub_path)
+                    library_db.update_file_status(
+                        file_id, status="done", action_taken=action,
+                        sync_drift_ms=drift, subtitle_path=str(sub_path),
+                        provider_used="embedded",
+                        subtitle_languages=["en"],
+                    )
             else:
                 library_db.update_file_status(
                     file_id, status="failed", error_message="Failed to extract embedded subtitle"
@@ -920,6 +953,90 @@ async def _translate_and_sync(
             continue
 
     raise RuntimeError(f"All translation backends failed: {last_error}")
+
+
+def _has_usable_dialogue(sub_path: Path) -> bool:
+    """Return True if a subtitle file contains actual spoken dialogue.
+
+    Some fansub releases embed a "signs/songs only" track — it translates
+    on-screen text (signs, game UI, OP/ED lyrics, spell effects) but has ZERO
+    spoken dialogue. ffprobe still reports it as an English stream, so Subber
+    would extract it and mark the file done with no dialogue at all.
+
+    Detection keys on the ABSENCE of dialogue, never the PRESENCE of positional
+    text (legit full subs frequently include `\\pos` sign translations, which
+    must NOT trigger a false positive).
+
+    For .ass: count events per style. If dialogue-capable styles (main, italics,
+    top, Default, dialogue, etc.) carry zero events while sign/song/effect styles
+    carry everything, it's a signs/songs-only track → return False.
+    For .srt/.vtt: no style info, so we can't distinguish — return True
+    (don't flag; the known failure mode is .ass).
+
+    Returns True unless we're confident there's no dialogue.
+    """
+    try:
+        text = sub_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return True  # unreadable → don't flag
+
+    suffix = sub_path.suffix.lower()
+    if suffix not in (".ass", ".ssa"):
+        return True  # .srt/.vtt have no style info → assume dialogue
+
+    # Styles whose exact (lowercased) name indicates spoken dialogue.
+    dialogue_styles = {
+        "main", "italics", "ital", "top", "default", "dialogue", "dial",
+        "sub", "subtitle", "subtitles", "normal", "text", "speech", "talk",
+        "caption", "dialogue2", "default2",
+    }
+    # Distinctive, specific substrings that mark a NON-dialogue style.
+    # (Deliberately NOT "op"/"ed" here — those are too short and appear inside
+    #  legitimate style names like "top".)
+    non_dialogue_markers = (
+        "sign", "song", "romaji", "karaoke", "title", "effect", "menu",
+        "game", "logo", "credit", "magic", "insert", "lyric", "banner",
+        "opening", "ending",
+    )
+
+    def _style_is_dialogue(style: str) -> bool:
+        s = style.lower().strip()
+        if s in dialogue_styles:
+            return True
+        for m in non_dialogue_markers:
+            if m in s:
+                return False
+        # "op"/"ed" only as a leading word (opening/ending theme lyrics).
+        for token in s.replace("_", " ").replace("-", " ").split():
+            if token in ("op", "ed"):
+                return False
+        # Unknown style name → assume dialogue (avoid false positives).
+        return True
+
+    dialogue_events = 0
+    non_dialogue_events = 0
+    for line in text.splitlines():
+        if not line.startswith("Dialogue:"):
+            continue
+        # Dialogue: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
+        parts = line.split(",", 9)
+        if len(parts) < 4:
+            continue
+        style = parts[3].strip()
+        if not style:
+            continue
+        if _style_is_dialogue(style):
+            dialogue_events += 1
+        else:
+            non_dialogue_events += 1
+
+    # No events at all → unusable (empty file)
+    if dialogue_events == 0 and non_dialogue_events == 0:
+        return False
+    # Signs/songs-only: zero dialogue-style events but non-zero sign/song events.
+    if dialogue_events == 0 and non_dialogue_events > 0:
+        return False
+    return True
 
 
 def _detect_sub_language(sub_path: Path) -> str:

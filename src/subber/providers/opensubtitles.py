@@ -290,12 +290,21 @@ class OpenSubtitlesProvider(SubtitleProvider):
             # "Invalid file_id" on multi-file records. Prefer files[0].file_id.
             files = attrs.get("files") or []
             dl_file_id = None
+            dl_filename = None
             if isinstance(files, list) and files and isinstance(files[0], dict):
                 dl_file_id = files[0].get("file_id")
+                dl_filename = files[0].get("file_name")
             dl_file_id = dl_file_id or r["id"]
+            # filename: prefer the downloadable file's real name, else release,
+            # else the feature title. (attrs.get("filename") is never populated
+            # by the API, which made every result show "unknown".)
+            filename = dl_filename or attrs.get("release") or ""
+            if not filename:
+                fd = attrs.get("feature_details") or {}
+                filename = fd.get("title") or "unknown"
             results.append(SubtitleResult(
                 id=f"opensubtitles_{dl_file_id}",
-                filename=attrs.get("filename", "unknown"),
+                filename=filename,
                 language=attrs.get("language", "?"),
                 provider="OpenSubtitles",
                 downloads=attrs.get("download_count", 0),
