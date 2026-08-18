@@ -834,12 +834,17 @@ function renderMounts() {
         '<input type="text" placeholder="Username" value="' + esc(m.username) + '" onchange="updateMount(' + i + ', &quot;username&quot;, this.value)" style="width: 130px; padding: 0.3rem; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 4px;">' +
         '<input type="password" placeholder="Password" value="' + esc(m.password || '') + '" onchange="updateMount(' + i + ', &quot;password&quot;, this.value)" style="width: 130px; padding: 0.3rem; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 4px;">' +
         '<input type="text" placeholder="Mount point (e.g. /mnt/anime)" value="' + esc(m.mount_point) + '" onchange="updateMount(' + i + ', &quot;mount_point&quot;, this.value)" style="flex: 1; min-width: 180px; padding: 0.3rem; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 4px;">' +
+        '<select onchange="updateMount(' + i + ', &quot;media_type&quot;, this.value)" style="padding: 0.3rem; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 4px; font-size: 0.85rem;" title="Force every file under this mount to be treated as TV or Movie (heuristics still fill season/episode/title)">' +
+            '<option value=""' + (!m.media_type ? ' selected' : '') + '>Auto-detect</option>' +
+            '<option value="tv"' + (m.media_type === 'tv' ? ' selected' : '') + '>TV Shows</option>' +
+            '<option value="movie"' + (m.media_type === 'movie' ? ' selected' : '') + '>Movies</option>' +
+        '</select>' +
         '<label style="display: flex; align-items: center; gap: 0.3rem; font-size: 0.85rem; white-space: nowrap; cursor: pointer; color: var(--text);"><input type="checkbox"' + (m.enabled !== false ? ' checked' : '') + ' onchange="updateMount(' + i + ', \'enabled\', this.checked)"> Enabled</label>' +
         '<button onclick="testMount(' + i + ')" style="background: var(--accent); color: #fff; border: none; padding: 0.3rem 0.8rem; border-radius: 4px; cursor: pointer; font-size: 0.85rem;">Test</button></div></div>').join('');
 }
 
 function addMount() {
-    mountsConfig.push({ name: '', server: '', share: '', username: '', password: '', mount_point: '/mnt/', enabled: true });
+    mountsConfig.push({ name: '', server: '', share: '', username: '', password: '', mount_point: '/mnt/', enabled: true, media_type: '' });
     renderMounts();
     saveMounts();
 }

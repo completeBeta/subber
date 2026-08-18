@@ -265,8 +265,15 @@ def query_files(
     params: list[Any] = []
 
     if status and status != "all":
-        where_clauses.append("status = ?")
-        params.append(status)
+        if status == "failed":
+            # "failed" view = files needing attention: genuinely failed AND
+            # those currently queued for retry. Folding `retrying` in here keeps
+            # retried items visible in the failed filter instead of vanishing
+            # the instant a retry resets them to a non-failed status.
+            where_clauses.append("status IN ('failed', 'retrying')")
+        else:
+            where_clauses.append("status = ?")
+            params.append(status)
     if media_type and media_type != "all":
         where_clauses.append("media_type = ?")
         params.append(media_type)
@@ -445,8 +452,8 @@ def get_stats() -> dict:
                    FROM library_files GROUP BY media_type, status"""
             ).fetchall()
 
-            tv_stats = {"total": 0, "done": 0, "failed": 0, "pending": 0, "in_progress": 0, "skipped": 0}
-            movie_stats = {"total": 0, "done": 0, "failed": 0, "pending": 0, "in_progress": 0, "skipped": 0}
+            tv_stats = {"total": 0, "done": 0, "failed": 0, "pending": 0, "in_progress": 0, "skipped": 0, "retrying": 0}
+            movie_stats = {"total": 0, "done": 0, "failed": 0, "pending": 0, "in_progress": 0, "skipped": 0, "retrying": 0}
 
             for row in status_rows:
                 mt = row["media_type"]

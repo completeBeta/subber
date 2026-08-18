@@ -162,6 +162,17 @@ async def run_scan(
     if mount_paths:
         print(f"[LIBRARY] Mount paths added: {mount_paths} (total: {len(paths)})", flush=True)
 
+    # Build mount_point → media_type map so directories tagged "TV Shows" or
+    # "Movies" get an authoritative type override during classification.
+    path_media_types: dict[str, str] = {}
+    for m in mounts:
+        mp = m.get("mount_point")
+        mt = (m.get("media_type") or "").lower()
+        if mp and mt in ("tv", "movie"):
+            path_media_types[str(mp)] = mt
+    if path_media_types:
+        print(f"[LIBRARY] Path media-type overrides: {path_media_types}", flush=True)
+
     if not paths:
         library_db.update_scan(scan_id, status="failed", error_message="No library paths configured")
         return scan_id
@@ -216,6 +227,7 @@ async def run_scan(
                 incremental=incremental,
                 existing_hashes=existing_hashes,
                 should_abort=lambda: _is_cancelled(scan_id) or _is_paused(scan_id),
+                path_media_types=path_media_types,
             ),
         )
 

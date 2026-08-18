@@ -49,8 +49,14 @@ def is_subtitle_file(path: Path) -> bool:
 
 # ── Media type classification ──
 
-def classify_media(file_path: Path, library_root: Path) -> tuple[str, dict]:
+def classify_media(file_path: Path, library_root: Path, forced_type: str | None = None) -> tuple[str, dict]:
     """Classify a video file as 'tv' or 'movie'.
+
+    If `forced_type` is 'tv' or 'movie', it acts as an AUTHORITATIVE override —
+    the heuristic extraction below still runs (so season/episode/title are still
+    populated where possible), but the top-level type is fixed. This lets a
+    library path be tagged as "always shows" or "always movies" so odd naming
+    can't flip the type.
 
     Returns (media_type, metadata_dict).
 
@@ -67,66 +73,78 @@ def classify_media(file_path: Path, library_root: Path) -> tuple[str, dict]:
     rel_path = file_path.relative_to(library_root)
     parts = rel_path.parts
     filename = file_path.stem
-    full_path_str = str(rel_path)
 
-    # Check for TV patterns in filename
-    for pattern in TV_PATTERNS:
-        match = pattern.search(filename)
-        if match:
-            # SxxExx or x pattern → TV
-            if "season" in pattern.pattern.lower() or "s" in pattern.pattern.lower()[:3]:
-                # Try to extract season + episode
-                season_match = re.search(r"[Ss](\d{1,2})", filename, re.IGNORECASE)
-                episode_match = re.search(r"[Ee](\d{1,3})", filename, re.IGNORECASE)
-                season = int(season_match.group(1)) if season_match else 1
-                episode = int(episode_match.group(1)) if episode_match else None
-                show_title = _clean_show_title(filename)
+    # ── TV detection ── (skipped entirely when forced to "movie")
+    if forced_type != "movie":
+        # Check for TV patterns in filename
+        for pattern in TV_PATTERNS:
+            match = pattern.search(filename)
+            if match:
+                # SxxExx or x pattern → TV
+                if "season" in pattern.pattern.lower() or "s" in pattern.pattern.lower()[:3]:
+                    # Try to extract season + episode
+                    season_match = re.search(r"[Ss](\d{1,2})", filename, re.IGNORECASE)
+                    episode_match = re.search(r"[Ee](\d{1,3})", filename, re.IGNORECASE)
+                    season = int(season_match.group(1)) if season_match else 1
+                    episode = int(episode_match.group(1)) if episode_match else None
+                    show_title = _clean_show_title(filename)
+                    return "tv", {
+                        "show_title": show_title,
+                        "season": season,
+                        "episode": episode,
+                    }
+
+        # Check for "Season XX" in path
+        for part in parts[:-1]:  # exclude filename
+            season_match = re.search(r"[Ss]eason[.\s_-]*(\d{1,2})", part, re.IGNORECASE)
+            if season_match:
+                season = int(season_match.group(1))
+                # Try to find episode number in filename
+                # Strip CRC/hash patterns first (e.g. [3E5BF53D]) — they can contain
+                # "E<digits>" that get mistaken for episode markers
+                clean_name = re.sub(r'\[[0-9A-Fa-f]{8}\]', '', filename)
+                clean_name = re.sub(r'\([0-9A-Fa-f]{8}\)', '', clean_name)
+                ep_match = re.search(r"[Ee](\d{1,3})", clean_name, re.IGNORECASE)
+                if not ep_match:
+                    ep_match = re.search(r"-\s*(\d{1,3})\b", clean_name)  # " - 02" format
+                if not ep_match:
+                    # Last resort: last number in filename (avoids group tags like [Moozzi2])
+                    nums = re.findall(r"\b(\d{1,3})\b", clean_name)
+                    ep_match = re.match(r"(\d+)", str(nums[-1])) if nums else None
+                episode = int(ep_match.group(1)) if ep_match else None
+                # Show title is the parent folder before "Season XX"
+                show_idx = parts.index(part)
+                show_title = parts[show_idx - 1] if show_idx > 0 else _clean_show_title(filename)
                 return "tv", {
-                    "show_title": show_title,
+                    "show_title": _clean_show_title(str(show_title)),
                     "season": season,
                     "episode": episode,
                 }
 
-    # Check for "Season XX" in path
-    for part in parts[:-1]:  # exclude filename
-        season_match = re.search(r"[Ss]eason[.\s_-]*(\d{1,2})", part, re.IGNORECASE)
-        if season_match:
-            season = int(season_match.group(1))
-            # Try to find episode number in filename
-            # Strip CRC/hash patterns first (e.g. [3E5BF53D]) — they can contain
-            # "E<digits>" that get mistaken for episode markers
-            clean_name = re.sub(r'\[[0-9A-Fa-f]{8}\]', '', filename)
-            clean_name = re.sub(r'\([0-9A-Fa-f]{8}\)', '', clean_name)
-            ep_match = re.search(r"[Ee](\d{1,3})", clean_name, re.IGNORECASE)
-            if not ep_match:
-                ep_match = re.search(r"-\s*(\d{1,3})\b", clean_name)  # " - 02" format
-            if not ep_match:
-                # Last resort: last number in filename (avoids group tags like [Moozzi2])
-                nums = re.findall(r"\b(\d{1,3})\b", clean_name)
-                ep_match = re.match(r"(\d+)", str(nums[-1])) if nums else None
-            episode = int(ep_match.group(1)) if ep_match else None
-            # Show title is the parent folder before "Season XX"
-            show_idx = parts.index(part)
-            show_title = parts[show_idx - 1] if show_idx > 0 else _clean_show_title(filename)
+        # Check for Episode.NNN pattern
+        ep_match = re.search(r"[Ee]pisode[.\s_-]*(\d{1,3})", filename, re.IGNORECASE)
+        if ep_match:
+            episode = int(ep_match.group(1))
+            # Use parent folder name as show title, not the filename
+            show_title = parts[-2] if len(parts) >= 2 else _clean_show_title(filename)
             return "tv", {
                 "show_title": _clean_show_title(str(show_title)),
-                "season": season,
+                "season": 1,
                 "episode": episode,
             }
 
-    # Check for Episode.NNN pattern
-    ep_match = re.search(r"[Ee]pisode[.\s_-]*(\d{1,3})", filename, re.IGNORECASE)
-    if ep_match:
-        episode = int(ep_match.group(1))
-        # Use parent folder name as show title, not the filename
+    # Forced to "tv" but no TV pattern matched — produce a best-effort TV record
+    # rather than silently falling through to "movie" (which would defeat the
+    # whole point of the directory tag).
+    if forced_type == "tv":
         show_title = parts[-2] if len(parts) >= 2 else _clean_show_title(filename)
         return "tv", {
             "show_title": _clean_show_title(str(show_title)),
             "season": 1,
-            "episode": episode,
+            "episode": None,
         }
 
-    # No TV patterns → check for movie (year in folder or filename)
+    # ── Movie detection (default path, or forced "movie") ──
     year = None
     movie_title = None
 
@@ -341,7 +359,7 @@ def validate_library_paths(requested_paths: list[str]) -> list[str]:
 
 _VID_EXTS = frozenset({".mkv", ".mp4", ".avi", ".mov", ".wmv", ".flv", ".m4v", ".webm", ".ts", ".m2ts"})
 
-def _process_one(fp, root, seen_paths, records, incremental, existing_hashes):
+def _process_one(fp, root, seen_paths, records, incremental, existing_hashes, forced_type=None):
     """Process one file: validate, dedup, classify."""
     fps = str(fp)
     if fps in seen_paths:
@@ -361,7 +379,7 @@ def _process_one(fp, root, seen_paths, records, incremental, existing_hashes):
         pass
     if incremental and existing_hashes and file_hash and file_hash in existing_hashes:
         return
-    media_type, metadata = classify_media(fp, root)
+    media_type, metadata = classify_media(fp, root, forced_type=forced_type)
     record = {
         'file_path': str(fp),
         'file_hash': file_hash,
@@ -379,6 +397,7 @@ def scan_library(
     incremental: bool = False,
     existing_hashes: set[str] | None = None,
     should_abort=None,
+    path_media_types: dict[str, str] | None = None,
 ) -> list[dict]:
     """Walk library paths and return a list of video file records.
 
@@ -392,11 +411,17 @@ def scan_library(
         should_abort: Optional callback; when it returns True the walk stops
             early and returns whatever has been collected so far. Used to make
             pause/cancel work during the (otherwise silent) filesystem walk.
+        path_media_types: Optional mapping of root path string → 'tv'/'movie'.
+            When a root is tagged, every file under it is forced to that type
+            (authoritative override — heuristics still fill in season/episode/
+            title, but the top-level type can't be flipped by odd naming).
 
     Returns list of file record dicts.
     """
     if existing_hashes is None:
         existing_hashes = set()
+    if path_media_types is None:
+        path_media_types = {}
 
     # Validate paths against configured library roots (path-traversal protection)
     library_paths = validate_library_paths(library_paths)
@@ -415,6 +440,8 @@ def scan_library(
         root = Path(root_path_str)
         if not root.exists():
             continue
+        # Forced media type for this root (from mount/directory tagging), if any.
+        forced_type = path_media_types.get(str(root)) or path_media_types.get(root_path_str)
 
         # Use os.scandir for CIFS performance (avoids stat overhead of glob/rglob)
         _WALKED = 0
@@ -424,7 +451,7 @@ def scan_library(
             # Video files directly in the library root (e.g. loose movies)
             if show_entry.is_file() and Path(show_entry.path).suffix.lower() in _VID_EXTS:
                 _WALKED += 1
-                _process_one(Path(show_entry.path), root, seen_paths, records, incremental, existing_hashes)
+                _process_one(Path(show_entry.path), root, seen_paths, records, incremental, existing_hashes, forced_type)
                 continue
             if not show_entry.is_dir():
                 continue
@@ -438,9 +465,9 @@ def scan_library(
                             return records
                         if file_entry.is_file() and Path(file_entry.path).suffix.lower() in _VID_EXTS:
                             _WALKED += 1
-                            _process_one(Path(file_entry.path), root, seen_paths, records, incremental, existing_hashes)
+                            _process_one(Path(file_entry.path), root, seen_paths, records, incremental, existing_hashes, forced_type)
                 elif season_entry.is_file() and Path(season_entry.path).suffix.lower() in _VID_EXTS:
                     _WALKED += 1
-                    _process_one(Path(season_entry.path), root, seen_paths, records, incremental, existing_hashes)
+                    _process_one(Path(season_entry.path), root, seen_paths, records, incremental, existing_hashes, forced_type)
 
     return records

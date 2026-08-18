@@ -2116,13 +2116,16 @@ async def api_library_retry(request: Request, _=Depends(_require_write_auth)):
     if not file_ids:
         return JSONResponse(content={"error": "No file IDs provided"}, status_code=400)
 
-    # Reset files to pending and queue them for processing
+    # Reset files to 'retrying' and queue them for processing. Using a distinct
+    # 'retrying' status (not 'pending') keeps them visible in the failed filter
+    # — they stay "needs attention" until they actually resolve to done/failed,
+    # instead of vanishing the moment the retry re-queues them.
     results = []
     records_to_process = []
     for fid in file_ids:
         record = _libdb.get_file(fid)
         if record:
-            _libdb.update_file_status(fid, status="pending", error_message="")
+            _libdb.update_file_status(fid, status="retrying", error_message="")
             records_to_process.append(record)
             results.append({"id": fid, "status": "queued"})
 
