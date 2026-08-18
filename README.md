@@ -4,6 +4,14 @@
 
 Upload a video, Subber finds subtitles across 5 providers, syncs them with ffsubsync, and translates non-English subs using **OpenRouter Llama 3.1 8B** (recommended — fast, cheap, accurate) with DeepSeek or Ollama as fallbacks. Or scan your entire media library and Subber handles everything automatically.
 
+## 📸 Screenshots
+
+| Library | Settings |
+|---|---|
+| ![Library](screenshots/library.png) | ![Settings](screenshots/settings.png) |
+| **Search** | **Grab** |
+| ![Search](screenshots/search.png) | ![Grab](screenshots/grab.png) |
+
 ## ⚙️ How It Works
 
 A library scan follows a deterministic pipeline designed to be **safe to run repeatedly** on a live media collection:
@@ -12,7 +20,7 @@ A library scan follows a deterministic pipeline designed to be **safe to run rep
 2. **Walks the filesystem** — discovers new, changed, and unprocessed files; skips anything already marked `done` in the DB
 3. **Checks for existing subtitles** — if a non-empty `.en.srt`/`.en.ass` already sits next to the video, it's skipped immediately (no re-download, no re-sync)
 4. **Extracts embedded subtitles** — ffmpeg pulls subtitle tracks from video files (configurable timeout, partial output cleaned on failure)
-5. **Searches external providers** — SubDL → Addic7ed → Podnapisi, with OpenSubtitles as a rate-limited fallback; episode-matching guard prevents wrong-episode downloads; zip/gzip packs are unpacked and matched
+5. **Searches external providers** — SubDL → Gestdown → Podnapisi, with OpenSubtitles as a rate-limited fallback; episode-matching guard prevents wrong-episode downloads; zip/gzip packs are unpacked and matched
 6. **Syncs with ffsubsync** — audio-alignment with drift threshold; skips re-sync if drift is below threshold
 7. **Translates if needed** — non-English subs go through the LLM backend chain (OpenRouter → DeepSeek → Ollama) with automatic fallback
 8. **Marks complete** — writes result to SQLite; scan progress, costs, and timing are all persisted
@@ -125,7 +133,7 @@ Full configuration UI. **Save Settings** persists everything (with validation th
 - **Translation Providers** — add/remove LLM backends with priority ordering (**+ Add Backend**)
 - **Default Languages** — preferred subtitle language order and acceptable track types
 - **Subtitle Sync** — sync engine and drift threshold
-- **Subtitle Providers** — enable/disable providers and enter credentials (SubDL key, OpenSubtitles, Addic7ed cookies)
+- **Subtitle Providers** — enable/disable providers and enter credentials (SubDL key, OpenSubtitles, Gestdown)
 - **Cost Estimation** — per-token pricing with peak-hour multipliers (**+ Add Range**)
 - **Show Identification** — AniList/TMDB settings and preferred source
 - **Library Settings** — scan paths, concurrency, auto-scan interval
@@ -136,13 +144,13 @@ Full configuration UI. **Save Settings** persists everything (with validation th
 
 ## 🌍 Subtitle Providers
 
-Providers are searched in priority order. **OpenSubtitles is a fallback** — only searched if primary providers (SubDL, Addic7ed, Podnapisi) return nothing. This saves your daily quota for when nothing else works.
+Providers are searched in priority order. **OpenSubtitles is a fallback** — only searched if primary providers (SubDL, Gestdown, Podnapisi) return nothing. This saves your daily quota for when nothing else works.
 
 | Provider | Type | Auth | Daily Limits | Fallback? |
 |---|---|---|---|---|
 | 🎬 **Embedded** | ffmpeg extraction | None | Unlimited | No |
 | 🔑 **SubDL** | REST API | API key | Free: 2,000 requests + 50 downloads · PRO: 30,000 requests + 2,000 downloads | No |
-| 📺 **Addic7ed** | Web scraping | Cookies (some downloads) | Fair use (no published limit) | No |
+| 📺 **Gestdown** | REST API (Addic7ed proxy) | None | Fair use (no published limit) | No |
 | 🌍 **Podnapisi** | Web scraping | None | Fair use (no published limit) | No |
 | 🌐 **OpenSubtitles** | REST API | .org user/pass or .com API key | .org VIP: 1,000 downloads · .com API: 5 (free) → 100,000 (Pro) downloads | **Yes** |
 
@@ -258,7 +266,7 @@ src/subber/
 ├── safewrite.py        # Safe subtitle file writes
 ├── providers/          # Subtitle provider implementations
 │   ├── subdl.py        # SubDL REST API
-│   ├── addic7ed.py     # Addic7ed scraper
+│   ├── gestdown.py     # Gestdown REST API (Addic7ed proxy)
 │   ├── podnapisi.py    # Podnapisi scraper
 │   ├── opensubtitles.py # OpenSubtitles REST API (rate-limited)
 │   ├── embedded.py     # ffmpeg subtitle extraction
