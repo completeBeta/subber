@@ -156,7 +156,7 @@ Providers are searched in priority order. **OpenSubtitles is a fallback** — on
 
 ### 🔑 OpenSubtitles Setup
 
-OpenSubtitles supports two auth methods — use **one or both**. Each mode has its **own API key** so switching never clears the other mode's credentials:
+OpenSubtitles offers two ways to authenticate — choose **one or the other**. Each has its own API key, so switching modes never erases the other's credentials:
 
 #### opensubtitles.org VIP (1,000 downloads/day)
 If you have a VIP subscription at [opensubtitles.org](https://www.opensubtitles.org):
@@ -332,6 +332,15 @@ pip install -e ".[dev]"
 All configurable via the Web UI at `/settings`. Config file at `config/config.yaml` (Docker) or `~/.config/subber/config.yaml` (standalone).
 
 Key sections: `translation.backends`, `providers`, `library`, `sync`, `cost`, `limits`, `ui` (API key).
+
+## 🚧 WIP
+
+- **Per-category library scans** — scan only Movies or only TV shows instead of the whole library at once.
+
+## 💡 Feature Requests
+
+- **Ad removal from subtitles** — strip sponsor/promo blocks from subtitle tracks.
+- **Audio extraction / ASR** — generate subtitles from the audio track when no subtitles are available.
 
 ## 📜 License
 
