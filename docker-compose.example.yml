@@ -2,8 +2,6 @@ services:
   subber:
     build: .
     container_name: subber
-    ports:
-    - 8676:8676
     volumes:
     - ./uploads:/app/uploads
     - ./config:/app/config
@@ -13,6 +11,7 @@ services:
     # - /mnt/smb-share:/mnt/smb-share:rw  # SMB/CIFS example
     environment:
     - SUBBER_CONFIG=/app/config/config.yaml
+    - SUBBER_PORT=8676            # change this to run on a different port
     privileged: true  # Required for SMB/CIFS mount support
-    network_mode: host
+    network_mode: host            # host networking: the app binds SUBBER_PORT directly
     restart: unless-stopped

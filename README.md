@@ -59,7 +59,7 @@ volumes:
 
 ```bash
 docker compose up -d --build
-# Open http://localhost:8676
+# Open http://localhost:8676  (or your SUBBER_PORT if you changed it)
 ```
 
 > **All config can also be set via the Web UI** at `/settings` after first start. The config files just save you from re-entering keys on every rebuild.
@@ -275,7 +275,7 @@ curl -X POST http://localhost:8676/api/library/scan \
 
 GET endpoints (read-only) are always open. Write endpoints (scan, translate, grab, settings changes) require the `X-API-Key` header **only when a key is configured**. When no key is set, writes are open — so you can always set your first key via the Settings UI.
 
-For SSL, use Cloudflare Tunnel or a reverse proxy (nginx/Caddy). Subber itself runs plain HTTP on port 8676.
+For SSL, use Cloudflare Tunnel or a reverse proxy (nginx/Caddy). Subber itself runs plain HTTP on port 8676 (change it via the `SUBBER_PORT` env var in `docker-compose.yml`).
 
 ## 🔧 Architecture
 
@@ -336,7 +336,7 @@ static/
 docker compose up -d --build
 ```
 
-- Runs on port `8676`
+- Runs on port `8676` by default (set `SUBBER_PORT` in `docker-compose.yml` to change it)
 - Volume mounts: `./uploads`, `./config`, `./data` (SQLite + logs + reports + stats)
 - Library mount: `/mnt/test_library` → your media directory
 - Host networking mode (required for provider API access)

@@ -31,4 +31,7 @@ EXPOSE 8676
 # Single worker — the app keeps scan state, config cache, and locks in memory.
 # Multiple workers give each process its own copy, causing duplicate scans,
 # stale config, and dead locks (no shared state). Single user + async = 1 worker.
-CMD ["uvicorn", "src.subber.web:app", "--host", "0.0.0.0", "--port", "8676", "--workers", "1"]
+#
+# The port comes from SUBBER_PORT (default 8676). `exec` keeps uvicorn as PID 1
+# so it receives SIGTERM directly (graceful shutdown + shutdown-cause logging).
+CMD ["sh", "-c", "exec uvicorn src.subber.web:app --host 0.0.0.0 --port ${SUBBER_PORT:-8676} --workers 1"]

@@ -9,15 +9,15 @@ services:
   subber-test:
     build: .
     container_name: subber-test
-    # network_mode: host ignores docker port mappings, so the port is set by
-    # overriding the CMD (the Dockerfile hardcodes 8676).
-    command: ["uvicorn", "src.subber.web:app", "--host", "0.0.0.0", "--port", "8677", "--workers", "1"]
+    # Same as the main compose, but on port 8677 with its own volumes, so it
+    # runs alongside the live instance without touching it.
     volumes:
     - ./uploads-test:/app/uploads
     - ./config-test:/app/config
     - ./data-test:/app/data
     environment:
     - SUBBER_CONFIG=/app/config/config.yaml
+    - SUBBER_PORT=8677
     privileged: true
     network_mode: host
     restart: unless-stopped
