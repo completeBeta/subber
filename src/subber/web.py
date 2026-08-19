@@ -61,8 +61,17 @@ async def http_exception_handler(request: _Request, exc: StarletteHTTPException)
 
 jinja_env = Environment(loader=FileSystemLoader(str(TEMPLATES_DIR)))
 
+class _NoCacheStaticFiles(StaticFiles):
+    """Serve static files with Cache-Control: no-cache so app.js/CSS updates
+    always load without needing a manual ?v= version bump."""
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 if STATIC_DIR.exists():
-    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+    app.mount("/static", _NoCacheStaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # ── API key auth (disabled by default — empty key = no auth) ──
 

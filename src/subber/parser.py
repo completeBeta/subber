@@ -60,6 +60,24 @@ def detect_language(text: str) -> str:
 
 
 def read_raw_texts(path: Path) -> list[str]:
-    """Read a subtitle file and return raw text lines (with \\N for line breaks in ASS)."""
-    subs = pysubs2.load(str(path), encoding="utf-8-sig")
-    return [event.plaintext for event in subs.events]
+    """Read a subtitle file and return raw text lines (with \\N for line breaks in ASS).
+
+    Falls back to a naive text read on parse failure so a malformed or
+    unrecognised subtitle file doesn't 500 the whole upload during
+    language auto-detection.
+    """
+    try:
+        subs = pysubs2.load(str(path), encoding="utf-8-sig")
+        return [event.plaintext for event in subs.events]
+    except Exception:
+        try:
+            raw = path.read_text(encoding="utf-8-sig", errors="replace")
+        except Exception:
+            return []
+        return [
+            ln for ln in (l.strip() for l in raw.splitlines())
+            if ln
+            and not ln.startswith(("[", ";", "!"))
+            and "-->" not in ln
+            and not ln.isdigit()
+        ]
