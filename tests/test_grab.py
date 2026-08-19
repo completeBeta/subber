@@ -259,14 +259,14 @@ def test_subdl_provider_capabilities():
     assert p.capabilities.supports_season_episode is True
 
 
-def test_addic7ed_provider_capabilities():
-    """Addic7edProvider has correct capabilities."""
-    from subber.providers.addic7ed import Addic7edProvider
+def test_gestdown_provider_capabilities():
+    """GestdownProvider has correct capabilities."""
+    from subber.providers.gestdown import GestdownProvider
 
-    p = Addic7edProvider()
-    assert p.name == "Addic7ed"
+    p = GestdownProvider()
+    assert p.name == "Gestdown"
     assert p.capabilities.free is True
-    assert p.capabilities.requires_auth is True
+    assert p.capabilities.requires_auth is False
     assert p.capabilities.supports_hash_search is False
     assert p.capabilities.supports_name_search is True
     assert p.capabilities.supports_season_episode is True
@@ -285,33 +285,20 @@ def test_podnapisi_provider_capabilities():
     assert p.capabilities.supports_season_episode is True
 
 
-def test_subscene_provider_capabilities():
-    """SubsceneProvider has correct capabilities."""
-    from subber.providers.subscene import SubsceneProvider
-
-    p = SubsceneProvider()
-    assert p.name == "Subscene"
-    assert p.capabilities.free is True
-    assert p.capabilities.requires_auth is False
-    assert p.capabilities.supports_hash_search is False
-    assert p.capabilities.supports_name_search is True
-    assert p.capabilities.supports_season_episode is False
-
-
 def test_all_providers_instantiable():
     """All five providers can be instantiated without errors."""
-    from subber.providers.addic7ed import Addic7edProvider
     from subber.providers.embedded import EmbeddedProvider
+    from subber.providers.gestdown import GestdownProvider
+    from subber.providers.opensubtitles import OpenSubtitlesProvider
     from subber.providers.podnapisi import PodnapisiProvider
     from subber.providers.subdl import SubDLProvider
-    from subber.providers.subscene import SubsceneProvider
 
     providers = [
         EmbeddedProvider(),
         SubDLProvider(),
-        Addic7edProvider(),
+        GestdownProvider(),
         PodnapisiProvider(),
-        SubsceneProvider(),
+        OpenSubtitlesProvider(),
     ]
     names = {p.name for p in providers}
-    assert names == {"Embedded", "SubDL", "Addic7ed", "Podnapisi", "Subscene"}
+    assert names == {"Embedded", "SubDL", "Gestdown", "Podnapisi", "OpenSubtitles"}
