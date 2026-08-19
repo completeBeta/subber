@@ -1,0 +1,23 @@
+# Isolated TEST instance — runs alongside the main instance on port 8677 with its
+# own config/data/uploads so you can experiment without touching production.
+#
+#   docker compose -f docker-compose.test.yml up -d --build
+#   docker compose -f docker-compose.test.yml down
+#
+# Open http://<host>:8677  (settings start unconfigured)
+services:
+  subber-test:
+    build: .
+    container_name: subber-test
+    # network_mode: host ignores docker port mappings, so the port is set by
+    # overriding the CMD (the Dockerfile hardcodes 8676).
+    command: ["uvicorn", "src.subber.web:app", "--host", "0.0.0.0", "--port", "8677", "--workers", "1"]
+    volumes:
+    - ./uploads-test:/app/uploads
+    - ./config-test:/app/config
+    - ./data-test:/app/data
+    environment:
+    - SUBBER_CONFIG=/app/config/config.yaml
+    privileged: true
+    network_mode: host
+    restart: unless-stopped

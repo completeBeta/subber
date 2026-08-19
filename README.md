@@ -66,6 +66,44 @@ docker compose up -d --build
 
 > **Minimal setup:** If you don't need translation or provider subtitles, just run step 3. Embedded subtitle extraction works with zero config.
 
+## 🔄 Updating
+
+When a new version is released, update in place:
+
+```bash
+cd Subber
+git pull
+docker compose up -d --build
+```
+
+**Your personal files are never overwritten.** The files you interact with are gitignored, so `git pull` leaves them untouched:
+
+| File | You edit it? | Updated by `git pull`? |
+|---|---|---|
+| `docker-compose.yml` | ✅ yes (media mounts, port) | ❌ no — your copy |
+| `config/config.yaml` | ✅ yes (API keys, providers, mounts) | ❌ no — your copy |
+| `docker-compose.example.yml` | ❌ no (template) | ✅ yes — may change |
+| `config.example.yaml` | ❌ no (template) | ✅ yes — may change |
+
+**When do you need to read this README?** Only in two situations:
+
+1. **First install** — the Quick Start above.
+2. **When a release changes the example config** — if an update adds or renames a config option, the release notes / `git pull` output will tell you. In that case, diff your `config/config.yaml` against `config.example.yaml` (or re-check the relevant README section) to see if you want the new defaults. Everything else (providers, subtitles, sync) updates automatically with no action on your part.
+
+If `git pull` ever reports a conflict, your local edits are the cause — recover with `git stash && git pull && docker compose up -d --build` (this is rare, since the files you edit are ignored).
+
+## 🧪 Testing on a second instance
+
+To run an isolated copy alongside your live instance (separate port, separate config/data/uploads) — useful for trying changes before your users hit them:
+
+```bash
+cp docker-compose.test.yml docker-compose.test.local.yml   # optional: tweak port
+docker compose -f docker-compose.test.yml up -d --build
+# Open http://localhost:8677  (starts with unconfigured settings)
+```
+
+It uses port `8677` and its own `config-test/`, `data-test/`, `uploads-test/` directories, so it won't touch your live instance.
+
 ## 📑 Tabs
 
 ### 🎬 Grab
