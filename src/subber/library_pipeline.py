@@ -125,7 +125,7 @@ async def run_scan(
     scan_id: int | None = None,
     dry_run: bool = True,
     media_types: list[str] | None = None,
-    max_concurrent: int = 2,
+    max_concurrent: int = 5,
     drift_threshold_ms: int = 200,
     skip_walk: bool = False,
 ) -> int:

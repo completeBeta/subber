@@ -54,7 +54,7 @@ DEFAULTS = {
     "library": {
         "paths": [],
         "drift_threshold_ms": 200,
-        "max_concurrent": 2,
+        "max_concurrent": 5,
         "scan_interval_hours": 6,
         "dry_run_default": True,
         "providers": {

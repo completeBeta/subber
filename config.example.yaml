@@ -46,21 +46,19 @@ providers:
   enabled:
     - embedded
     - subdl
-    - addic7ed
-    - subscene
+    - gestdown
+    - podnapisi
     - opensubtitles             # Fallback — only searched if nothing else found
   subdl:
     api_key: ""                  # Free key from subdl.com (2,000 requests + 50 downloads/day)
     pro_mode: false              # PRO: 30,000 requests + 2,000 downloads/day
-  addic7ed:
-    cookies: ""                  # Browser cookies for addic7ed.com
+  gestdown: {}
   opensubtitles:
     api_key: ""                  # .com API consumer key (opensubtitles.com/consumers)
     username: ""                 # .org VIP username (1,000 downloads/day with VIP)
     password: ""                 # .org VIP password
     tier: free                   # free (5/day) | dev (100/day) | lite (2,000) | startup (5,000) | basic (15,000) | premium (50,000) | pro (100,000) | vip (.org 1,000/day)
     daily_limit: 0               # Override daily limit (0 = use tier default)
-  subscene: true
   podnapisi: true                # Disabled by default (DNS issues)
   embedded: true
 
@@ -74,7 +72,7 @@ selection:
 library:
   paths: []                      # Add your media directories here
   drift_threshold_ms: 200
-  max_concurrent: 4
+  max_concurrent: 5
   scan_interval_hours: 0         # 0 = manual only, 6 = every 6 hours
   dry_run_default: false         # Start with real scans (not preview)
   use_identification: true       # AniList + TMDB show identification
@@ -84,8 +82,7 @@ library:
     enabled:
       - embedded
       - subdl
-      - addic7ed
-      - subscene
+      - gestdown
       - opensubtitles
 
 # --- UI ---

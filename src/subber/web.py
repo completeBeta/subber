@@ -1853,7 +1853,7 @@ async def _launch_library_scan(
         )
 
     lib_cfg = _subber_config.get_section("library")
-    max_concurrent = lib_cfg.get("max_concurrent", 2)
+    max_concurrent = lib_cfg.get("max_concurrent", 5)
     drift_threshold = lib_cfg.get("drift_threshold_ms", 200)
 
     _libdb.init_db()
@@ -2033,7 +2033,7 @@ async def api_library_scan_resume(scan_id: str, _=Depends(_require_write_auth)):
         return JSONResponse(content={"error": "Scan not found or not paused"}, status_code=404)
 
     lib_cfg = _subber_config.get_section("library")
-    max_concurrent = lib_cfg.get("max_concurrent", 2)
+    max_concurrent = lib_cfg.get("max_concurrent", 5)
     drift_threshold = lib_cfg.get("drift_threshold_ms", 200)
 
     _libdb.update_scan(sid, status="running", error_message=None)
@@ -2132,7 +2132,7 @@ async def api_library_retry(request: Request, _=Depends(_require_write_auth)):
     # If not dry-run, process the files in background
     if not dry_run and records_to_process:
         lib_cfg = _subber_config.get_section("library")
-        max_concurrent = lib_cfg.get("max_concurrent", 2)
+        max_concurrent = lib_cfg.get("max_concurrent", 5)
         drift_threshold = lib_cfg.get("drift_threshold_ms", 200)
 
         async def _process_retries():
