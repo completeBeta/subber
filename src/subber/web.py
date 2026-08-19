@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader
 
-from . import config
+from . import config, version_string
 from .parser import detect_language, read_raw_texts
 from .translator import TranslationCancelled, Translator
 import logging
@@ -60,6 +60,7 @@ async def http_exception_handler(request: _Request, exc: StarletteHTTPException)
     return JSONResponse(content={"error": str(exc.detail)}, status_code=exc.status_code)
 
 jinja_env = Environment(loader=FileSystemLoader(str(TEMPLATES_DIR)))
+jinja_env.globals["app_version"] = version_string()
 
 class _NoCacheStaticFiles(StaticFiles):
     """Serve static files with Cache-Control: no-cache so app.js/CSS updates
@@ -365,6 +366,7 @@ async def api_health():
     usage = shutil.disk_usage(UPLOAD_DIR)
     return {
         "status": "ok",
+        "version": version_string(),
         "free_disk_mb": round(usage.free / (1024 * 1024), 1),
         "total_disk_mb": round(usage.total / (1024 * 1024), 1),
         "active_jobs": len([j for j in _jobs.values() if j.status == JobStatus.TRANSLATING]),
@@ -2803,6 +2805,7 @@ async def api_logs_diagnostics(_=Depends(_require_write_auth)):
 
     bundle = {
         "generated_at": _dt.now(_tz.utc).isoformat(),
+        "version": version_string(),
         "system": {
             "platform": platform.platform(),
             "python": platform.python_version(),

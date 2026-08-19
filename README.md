@@ -381,6 +381,21 @@ Key sections: `translation.backends`, `providers`, `library`, `sync`, `cost`, `l
 - **Audio extraction / ASR** — generate subtitles from the audio track when no subtitles are available.
 - **Full mobile responsiveness** — make the whole UI (nav, tables, forms, banners) usable on phone-sized screens.
 
+## 🐛 Reporting Issues
+
+Found a bug or something behaving oddly? Report it on [GitHub Issues](https://github.com/completeBeta/Subber/issues/new/choose) — that's the one place all reports go, so nothing gets lost.
+
+Include these six things to make it quick to diagnose:
+
+1. **The Diagnostics bundle** — Logs tab → 🩺 Diagnostics → download. It packs your (redacted) logs, config shape, system info, scan state, and restart history into one file. This is the single most useful thing you can attach.
+2. **What you did** — which tab, what file, what you clicked.
+3. **What you expected vs. what actually happened.**
+4. **The exact error message** — paste the text, or attach a screenshot (blur anything private first).
+5. **Your version** — shown in the footer of every page (e.g. `v0.6.0`).
+6. **When it started** — right after an update, or has it always done this?
+
+> ⚠️ **Privacy:** the Diagnostics bundle is redacted (API keys, passwords, and IPs are masked), so it's safe to attach publicly. The raw logs under **Logs → Export Full History** are *not* redacted — don't post those publicly.
+
 ## 📜 License
 
 MIT — see [LICENSE](LICENSE).
