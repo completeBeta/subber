@@ -113,7 +113,10 @@ function showSuccess(data) {
 // ── Upload ──
 async function startTranslation() {
     const form = new FormData();
-    if (selectedFiles.length === 1) {
+    form.append("source_lang", document.getElementById("source-lang").value);
+    form.append("target_lang", document.getElementById("target-lang").value);
+    const isMulti = selectedFiles.length > 1;
+    if (!isMulti) {
         form.append("file", selectedFiles[0]);
     } else {
         for (const f of selectedFiles) form.append("files", f);
@@ -129,7 +132,8 @@ async function startTranslation() {
     btnCancel.style.display = "inline-block";
 
     try {
-        const resp = await fetch("/translate", { method: "POST", body: form });
+        const url = isMulti ? "/api/upload-batch" : "/api/upload";
+        const resp = await fetch(url, { method: "POST", body: form });
         const data = await resp.json();
         if (data.error) { showError(data.error); return; }
 
@@ -226,7 +230,7 @@ async function pollJob(jobId) {
 async function pollBatch(batchId) {
     const poll = async () => {
         try {
-            const resp = await fetch(`/api/jobs/batch/${batchId}`);
+            const resp = await fetch(`/api/batch/${batchId}`);
             const data = await resp.json();
             if (data.error) { showError(data.error); return; }
 

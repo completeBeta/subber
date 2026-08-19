@@ -455,6 +455,72 @@ async def api_upload(_=Depends(_require_write_auth),
     }
 
 
+@app.post("/api/upload-batch")
+async def api_upload_batch(
+    _=Depends(_require_write_auth),
+    files: list[UploadFile] = File(...),
+    source_lang: str = Form("auto"),
+    target_lang: str = Form("en"),
+):
+    """Upload multiple subtitle files and translate them as a batch."""
+    if not files:
+        return JSONResponse(content={"error": "No files provided"}, status_code=400)
+
+    _check_disk()
+
+    contents: list[tuple[str, str, bytes]] = []
+    total_bytes = 0
+    for f in files:
+        if not f.filename:
+            return JSONResponse(content={"error": "No file provided"}, status_code=400)
+        suffix = Path(f.filename).suffix.lower()
+        if suffix not in (".srt", ".ass", ".ssa", ".vtt"):
+            return JSONResponse(
+                content={"error": f"Unsupported format: {suffix}. Use .srt, .ass, .ssa, or .vtt"},
+                status_code=400,
+            )
+        data = await f.read()
+        total_bytes += len(data)
+        contents.append((f.filename, suffix, data))
+
+    _check_upload_size(total_bytes)
+
+    display_name = files[0].filename if len(files) == 1 else f"{files[0].filename} (+{len(files) - 1} more)"
+    batch = BatchJob(original_name=display_name, source_lang=source_lang, target_lang=target_lang)
+    job_ids: list[str] = []
+    for name, suffix, data in contents:
+        job = TranslationJob(
+            original_name=name,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            status=JobStatus.PENDING,
+        )
+        input_path = UPLOAD_DIR / f"{job.id}_in{suffix}"
+        input_path.write_bytes(data)
+        job.input_path = str(input_path)
+        if source_lang == "auto":
+            texts = read_raw_texts(input_path)
+            sample = " ".join(texts[:30])
+            job.source_lang = detect_language(sample)
+        _jobs[job.id] = job
+        job_ids.append(job.id)
+        if job.source_lang == job.target_lang:
+            job.status = JobStatus.DONE
+            job.output_path = str(input_path)
+            job.total_chunks = 0
+        else:
+            asyncio.create_task(_run_translation(job.id))
+    batch.job_ids = job_ids
+    _batches[batch.id] = batch
+    return {
+        "batch_id": batch.id,
+        "job_ids": job_ids,
+        "file_count": len(job_ids),
+        "source_lang": source_lang,
+        "target_lang": target_lang,
+    }
+
+
 @app.get("/api/jobs/{job_id}")
 async def api_job_status(job_id: str):
     job = _jobs.get(job_id)
