@@ -194,3 +194,39 @@
     color: var(--text-muted);
     font-size: 0.85rem;
 }
+
+
+/* Paid-subscription corner pill (library tab) */
+#pro-mode-pill {
+    display: none;
+    position: fixed;
+    top: 12px;
+    right: 12px;
+    z-index: 1000;
+    background: var(--bg-secondary, #1a1a2e);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 0.35rem 0.7rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: default;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+    max-width: 70vw;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Phones: a fixed corner pill overlaps the header. Drop it into the normal
+   flow at the top of the content so it wraps instead of covering the title. */
+@media (max-width: 640px) {
+    #pro-mode-pill {
+        position: static;
+        max-width: 100%;
+        white-space: normal;
+        text-align: center;
+        border-radius: 8px;
+        margin: 0 0 0.5rem 0;
+    }
+}
