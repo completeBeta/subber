@@ -379,6 +379,7 @@ Key sections: `translation.backends`, `providers`, `library`, `sync`, `cost`, `l
 
 - **Ad removal from subtitles** — strip sponsor/promo blocks from subtitle tracks.
 - **Audio extraction / ASR** — generate subtitles from the audio track when no subtitles are available.
+- **Full mobile responsiveness** — make the whole UI (nav, tables, forms, banners) usable on phone-sized screens.
 
 ## 📜 License
 
