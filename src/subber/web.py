@@ -1268,8 +1268,7 @@ async def _run_grab_pipeline(
             if on_step:
                 on_step(pipeline_result["steps"][-1])
 
-            sub_path = tmp_dir / best.filename
-            await registry.download(best, tmp_dir)
+            sub_path = await registry.download(best, tmp_dir)
             pipeline_result["found"] = True
 
             # Auto-translate if provider result is non-English

@@ -8,6 +8,32 @@ from .base import SubtitleProvider
 from . import provider_stats
 
 
+_VALID_SUB_EXTS = {".srt", ".ass", ".ssa", ".vtt"}
+
+
+def _ensure_subtitle_extension(path: Path) -> Path:
+    """Return the path with a correct subtitle extension, sniffing the file
+    content when the current extension is missing or wrong.
+
+    Provider `filename` fields are often release names with no extension
+    (e.g. OpenSubtitles "breaking.bad.s01e01.dvdrip.xvid-orpheus"), which
+    breaks Path.suffix and produces extensionless downloads.
+    """
+    if path.suffix.lower() in _VALID_SUB_EXTS:
+        return path
+    try:
+        from ..parser import detect_format
+        ext = f".{detect_format(path).value}"
+    except Exception:
+        return path
+    new_path = path.with_name(path.name + ext)
+    try:
+        path.rename(new_path)
+        return new_path
+    except OSError:
+        return path
+
+
 class ProviderRegistry:
     """Manages multiple subtitle providers and searches them in parallel.
 
@@ -133,7 +159,7 @@ class ProviderRegistry:
         output_path = output_dir / filename
         result_path = await provider.download(result, output_path)
         provider_stats.record_download(result.provider)
-        return result_path
+        return _ensure_subtitle_extension(result_path)
 
     async def close(self) -> None:
         """Close all provider connections."""
