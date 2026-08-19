@@ -31,3 +31,6 @@ data/
 config/config.yaml
 .hermes/
 docker-compose.yml
+uploads-test/
+data-test/
+config-test/
