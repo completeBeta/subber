@@ -1206,6 +1206,28 @@ async def _run_grab_pipeline(
             _inject_model_header(translated, model_used)
             return translated, (model_used or "unknown")
 
+        def _strip_ads(sub_path: Path) -> None:
+            """Strip advert/credit lines (opt-in, off by default) from a new sub."""
+            from .ad_removal import remove_ads
+            cfg = config.ad_removal_settings()
+            if cfg.get("mode", "off") == "off":
+                return
+            try:
+                res = remove_ads(
+                    sub_path,
+                    mode=cfg.get("mode", "adverts"),
+                    window_seconds=int(cfg.get("window_seconds", 60) or 60),
+                    extra_patterns=cfg.get("patterns") or [],
+                )
+            except Exception as e:
+                _log.warning("Ad removal failed for %s: %s", sub_path.name, e)
+                return
+            if res["removed"]:
+                step = f"Removed {res['removed']} advert/credit line(s)"
+                pipeline_result["steps"].append(step)
+                if on_step:
+                    on_step(step)
+
 
         # Step 1: Probe embedded subtitles with smart track selection
         from .providers.embedded import EmbeddedProvider
@@ -1228,6 +1250,7 @@ async def _run_grab_pipeline(
 
             sub_path = tmp_dir / f"extracted{Path(best_embedded.filename).suffix}"
             await embedded_prov.download(best_embedded, sub_path)
+            _strip_ads(sub_path)
             pipeline_result["found"] = True
 
             if best_embedded.language == "en":
@@ -1271,6 +1294,7 @@ async def _run_grab_pipeline(
                 on_step(pipeline_result["steps"][-1])
 
             sub_path = await registry.download(best, tmp_dir)
+            _strip_ads(sub_path)
             pipeline_result["found"] = True
 
             # Auto-translate if provider result is non-English

@@ -68,6 +68,12 @@ selection:
   acceptable_track_types: [dialogue, sdh]
   track_type_priority: [dialogue, sdh, forced, commentary, signs]
 
+# --- Ad / Credit Removal ---
+ad_removal:
+  mode: off                     # off | adverts | adverts_and_credits
+  window_seconds: 60            # intro/outro window scanned for ad/credit lines
+  patterns: []                  # extra case-insensitive regex patterns
+
 # --- Library ---
 library:
   paths: []                      # Add your media directories here

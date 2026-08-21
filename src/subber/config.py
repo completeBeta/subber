@@ -51,6 +51,12 @@ DEFAULTS = {
         "track_type_priority": ["dialogue", "sdh", "forced", "commentary", "signs"],
     },
 
+    "ad_removal": {
+        "mode": "off",           # "off" | "adverts" | "adverts_and_credits"
+        "window_seconds": 60,    # intro/outro window scanned for ad/credit lines
+        "patterns": [],          # extra case-insensitive regex patterns
+    },
+
     "library": {
         "paths": [],
         "drift_threshold_ms": 200,
@@ -205,6 +211,10 @@ def translation_backends() -> list[dict]:
 
 def library_settings() -> dict:
     return get_section("library")
+
+
+def ad_removal_settings() -> dict:
+    return get_section("ad_removal")
 
 def build_provider_registry() -> "ProviderRegistry":
     """Build a ProviderRegistry from current config settings.

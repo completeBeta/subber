@@ -331,6 +331,15 @@
             </select>
         </div>
         <div class="form-group">
+            <label>Ad / Credit Removal</label>
+            <select id="cfg-ad-removal-mode">
+                <option value="off">Off</option>
+                <option value="adverts">Strip adverts / donations</option>
+                <option value="adverts_and_credits">Strip adverts + group credits</option>
+            </select>
+            <div class="hint">Removes advertising, donation-request, and fansub-credit lines from the intro/outro of downloaded subtitles. Off by default.</div>
+        </div>
+        <div class="form-group">
             <label class="checkbox-label" style="display: flex; align-items: center; gap: 0.3rem; cursor: pointer;">
                 <input type="checkbox" id="cfg-dry-run-default" checked> Default to Dry Run (recommended)
             </label>
@@ -465,6 +474,7 @@ async function loadSettings() {
             document.getElementById('cfg-drift-threshold').value = cfg.library.drift_threshold_ms || 200;
             document.getElementById('cfg-max-concurrent').value = cfg.library.max_concurrent || 2;
             document.getElementById('cfg-scan-interval').value = cfg.library.scan_interval_hours || 0;
+            document.getElementById('cfg-ad-removal-mode').value = (cfg.ad_removal && cfg.ad_removal.mode) || 'off';
             document.getElementById('cfg-dry-run-default').checked = cfg.library.dry_run_default !== false;
             document.getElementById('cfg-use-identification').checked = cfg.library.use_identification !== false;
             document.getElementById('cfg-identify-prefer').value = cfg.library.identify_prefer || 'anilist';
@@ -732,6 +742,12 @@ async function saveSettings() {
                 use_identification: document.getElementById('cfg-use-identification').checked,
                 identify_prefer: document.getElementById('cfg-identify-prefer').value,
                 tmdb_api_key: document.getElementById('cfg-tmdb-api-key').value,
+            }
+        },
+        {
+            section: 'ad_removal',
+            values: {
+                mode: document.getElementById('cfg-ad-removal-mode').value,
             }
         },
         {

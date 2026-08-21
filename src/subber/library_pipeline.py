@@ -1283,6 +1283,23 @@ async def _search_download_and_process(
         downloaded_path.unlink(missing_ok=True)
         return {"success": False, "error": str(e)}
 
+    # Ad/credit removal (opt-in) — strip advert & fansub-credit lines from the
+    # intro/outro before language detection / translation.
+    try:
+        ad_cfg = subber_config.ad_removal_settings()
+        if ad_cfg.get("mode", "off") != "off":
+            from .ad_removal import remove_ads
+            res = remove_ads(
+                downloaded_path,
+                mode=ad_cfg.get("mode", "adverts"),
+                window_seconds=int(ad_cfg.get("window_seconds", 60) or 60),
+                extra_patterns=ad_cfg.get("patterns") or [],
+            )
+            if res["removed"]:
+                logger.info("Ad removal: stripped %d line(s) from %s", res["removed"], sanitize_log(downloaded_path.name))
+    except Exception as e:
+        logger.warning("Ad removal failed for %s: %s", sanitize_log(downloaded_path.name), e)
+
     # Check if downloaded sub is English
     sub_lang = _detect_sub_language(downloaded_path)
     if sub_lang in ENGLISH_LANGS:

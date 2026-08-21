@@ -175,6 +175,7 @@ Full configuration UI. **Save Settings** persists everything (with validation th
 - **Cost Estimation** — per-token pricing with peak-hour multipliers (**+ Add Range**)
 - **Show Identification** — AniList/TMDB settings and preferred source
 - **Library Settings** — scan paths, concurrency, auto-scan interval
+- **Ad / Credit Removal** — strip advert, donation-request, and fansub-credit lines from the intro/outro of downloaded subtitles (off by default)
 - **Library Mounts (SMB/CIFS)** — add mounts (**+ Add Mount**), **Test** a share, **Remove** it
 - **💾 Database Backups** — **Backup Now**, **Refresh** the list, **Restore**, or delete a backup
 - **⚠ Caution Zone** — upload size and minimum-free-disk limits
@@ -377,7 +378,6 @@ Key sections: `translation.backends`, `providers`, `library`, `sync`, `cost`, `l
 
 ## 💡 Feature Requests
 
-- **Ad removal from subtitles** — strip sponsor/promo blocks from subtitle tracks.
 - **Audio extraction / ASR** — generate subtitles from the audio track when no subtitles are available.
 - **Full mobile responsiveness** — make the whole UI (nav, tables, forms, banners) usable on phone-sized screens.
 

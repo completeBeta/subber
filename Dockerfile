@@ -2,11 +2,6 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Bake the git SHA into the image so the version footer can show it.
-# Pass with: docker compose build --build-arg GIT_SHA=$(git rev-parse --short HEAD)
-ARG GIT_SHA=unknown
-ENV SUBBER_GIT_SHA=${GIT_SHA}
-
 # Install ffmpeg for ffsubsync audio alignment
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg cifs-utils && \
     rm -rf /var/lib/apt/lists/*
@@ -32,6 +27,12 @@ COPY templates/ templates/
 COPY static/ static/
 
 EXPOSE 8676
+
+# Bake the git SHA into the image so the version footer can show it. Placed at
+# the very end so a SHA change only invalidates this cheap layer, not pip install.
+# Pass with: docker compose build --build-arg GIT_SHA=$(git rev-parse --short HEAD)
+ARG GIT_SHA=unknown
+ENV SUBBER_GIT_SHA=${GIT_SHA}
 
 # Single worker — the app keeps scan state, config cache, and locks in memory.
 # Multiple workers give each process its own copy, causing duplicate scans,
