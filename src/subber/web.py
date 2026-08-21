@@ -2731,7 +2731,7 @@ async def api_logs(
             continue
         if level and f"[{level.upper()}]" not in line:
             continue
-        filtered.append(line.rstrip("\n"))
+        filtered.append(_redact_secrets(line.rstrip("\n")))
 
     total = len(filtered)
 
@@ -2752,10 +2752,14 @@ async def api_logs_download(_=Depends(_require_write_auth)):
     """Download the full log file."""
     if not _LOG_FILE.exists():
         return JSONResponse(content={"error": "Log file not found"}, status_code=404)
-    return FileResponse(
-        path=str(_LOG_FILE),
-        filename="subber.log",
+    try:
+        raw = _LOG_FILE.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return JSONResponse(content={"error": "Cannot read log file"}, status_code=500)
+    return Response(
+        content="\n".join(_redact_secrets(ln) for ln in raw.splitlines()),
         media_type="text/plain",
+        headers={"Content-Disposition": "attachment; filename=subber.log"},
     )
 
 
@@ -2785,7 +2789,7 @@ async def api_logs_export(_=Depends(_require_write_auth)):
         try:
             with open(p, "r", encoding="utf-8", errors="replace") as f:
                 buf.write(f"===== {p.name} =====\n")
-                buf.write(f.read())
+                buf.write(_redact_secrets(f.read()))
                 buf.write("\n")
             count += 1
         except OSError:
@@ -2794,7 +2798,7 @@ async def api_logs_export(_=Depends(_require_write_auth)):
         try:
             with open(_LOG_FILE, "r", encoding="utf-8", errors="replace") as f:
                 buf.write(f"===== {_LOG_FILE.name} (current) =====\n")
-                buf.write(f.read())
+                buf.write(_redact_secrets(f.read()))
             count += 1
         except OSError:
             pass
@@ -2808,15 +2812,27 @@ async def api_logs_export(_=Depends(_require_write_auth)):
     )
 
 
-def _redact_line(line: str) -> str:
-    """Scrub secrets from a line for the diagnostics bundle."""
+def _redact_secrets(line: str) -> str:
+    """Mask API keys/tokens/passwords in a line (defense-in-depth backstop).
+
+    Deliberately does NOT mask IPs or filesystem paths — the operator's live
+    log view needs those for diagnosis. Only actual secrets are scrubbed.
+    """
     import re as _re
-    line = _re.sub(r"(?i)(api[_-]?key|password|token|secret|authorization)[\"'\s:=]+[\"']?([A-Za-z0-9_\-\.+/=]{6,})[\"']?",
-                   r"\1=[REDACTED]", line)
-    line = _re.sub(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b", "[IP]", line)
+    line = _re.sub(
+        r"(?i)(api[_-]?key|password|passwd|token|secret|authorization)[\"'\s:=]+[\"']?([A-Za-z0-9_\-\.+/=]{6,})[\"']?",
+        r"\1=[REDACTED]", line,
+    )
     line = _re.sub(r"sk-[A-Za-z0-9_\-]{10,}", "[REDACTED]", line)
     return line
 
+
+def _redact_line(line: str) -> str:
+    """Scrub secrets AND IPs from a line (diagnostics bundle)."""
+    import re as _re
+    line = _redact_secrets(line)
+    line = _re.sub(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b", "[IP]", line)
+    return line
 
 @app.get("/api/logs/diagnostics")
 async def api_logs_diagnostics(_=Depends(_require_write_auth)):
@@ -3015,6 +3031,22 @@ async def startup():
     root_logger.addHandler(fh)
     root_logger.setLevel(logging.DEBUG)
     _log.info("File logging started (daily rotation, 45d retention): %s", _LOG_FILE)
+
+    # Warn loudly when exposed without an API key — the UI and log endpoints are
+    # open to anyone who can reach the port. Default bind is 0.0.0.0 (all interfaces).
+    try:
+        _ui_key = (config.get().get("ui", {}) or {}).get("api_key", "")
+        if not _ui_key:
+            _bind_host = os.environ.get("SUBBER_HOST", "0.0.0.0") or "0.0.0.0"
+            if _bind_host in ("0.0.0.0", "::"):
+                _log.warning(
+                    "API key not set and app bound to %s — the web UI and log endpoints "
+                    "are open to anyone who can reach this port. Set ui.api_key in "
+                    "config.yaml to require authentication.",
+                    _bind_host,
+                )
+    except Exception:
+        pass
 
     # Record boot in the shutdown-history file so restarts are countable and
     # the diagnostics bundle can show "N boots, last shutdown reason=X".
