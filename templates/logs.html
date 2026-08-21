@@ -29,8 +29,8 @@
             </label>
             <button class="btn-save" onclick="loadLogs()" style="padding: 0.35rem 0.8rem;">🔄 Refresh</button>
             <button class="btn-save" onclick="clearLogsFilter()" style="padding: 0.35rem 0.8rem; background: var(--text-muted);">Clear</button>
-            <a href="/api/logs/download" class="btn-save" style="padding: 0.35rem 0.8rem; background: var(--accent); text-decoration: none; display: inline-block;">⬇ Download Log</a>
-            <a href="/api/logs/export" class="btn-save" style="padding: 0.35rem 0.8rem; background: #2ecc71; text-decoration: none; display: inline-block;" title="All rotated daily files + current log in one file">⬇ Export Full History</a>
+            <button class="btn-save" onclick="downloadLog()" style="padding: 0.35rem 0.8rem; background: var(--accent);">⬇ Download Log</button>
+            <button class="btn-save" onclick="exportLogs()" style="padding: 0.35rem 0.8rem; background: #2ecc71;" title="All rotated daily files + current log in one file">⬇ Export Full History</button>
             <button class="btn-save" onclick="downloadDiagnostics()" style="padding: 0.35rem 0.8rem; background: #9b59b6;" title="Redacted system/config/error bundle — safe to share in bug reports">🩺 Diagnostics</button>
         </div>
     </div>
@@ -55,17 +55,30 @@
 <script>
 const API_KEY = '{{ api_key }}';
 let autoRefreshTimer = null;
+const AUTOREFRESH_KEY = 'subber.logs.autorefresh';
 
 document.addEventListener('DOMContentLoaded', () => {
     loadLogs();
     loadApiStats();
+    // Restore auto-refresh state after a page refresh
+    if (localStorage.getItem(AUTOREFRESH_KEY) === 'true') {
+        document.getElementById('log-autorefresh').checked = true;
+        startAutoRefresh();
+    }
 });
+
+function startAutoRefresh() {
+    if (autoRefreshTimer) clearInterval(autoRefreshTimer);
+    autoRefreshTimer = setInterval(() => { loadLogs(); loadApiStats(); }, 5000);
+}
 
 function toggleAutoRefresh() {
     const enabled = document.getElementById('log-autorefresh').checked;
     if (enabled) {
-        autoRefreshTimer = setInterval(() => { loadLogs(); loadApiStats(); }, 5000);
+        localStorage.setItem(AUTOREFRESH_KEY, 'true');
+        startAutoRefresh();
     } else {
+        localStorage.removeItem(AUTOREFRESH_KEY);
         clearInterval(autoRefreshTimer);
         autoRefreshTimer = null;
     }
@@ -100,21 +113,67 @@ async function downloadDiagnostics() {
     }
 }
 
+async function downloadLog() {
+    try {
+        const resp = await fetch('/api/logs/download', {
+            headers: {'X-API-Key': API_KEY},
+        });
+        if (!resp.ok) {
+            alert('Download failed: HTTP ' + resp.status);
+            return;
+        }
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'subber.log';
+        a.click();
+        URL.revokeObjectURL(url);
+    } catch (e) {
+        alert('Download error: ' + e.message);
+    }
+}
+
+async function exportLogs() {
+    try {
+        const resp = await fetch('/api/logs/export', {
+            headers: {'X-API-Key': API_KEY},
+        });
+        if (!resp.ok) {
+            alert('Export failed: HTTP ' + resp.status);
+            return;
+        }
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'subber_logs_full.txt';
+        a.click();
+        URL.revokeObjectURL(url);
+    } catch (e) {
+        alert('Export error: ' + e.message);
+    }
+}
+
 async function loadLogs() {
     const search = document.getElementById('log-search').value;
     const level = document.getElementById('log-level').value;
     const lines = document.getElementById('log-lines').value;
 
+    const viewer = document.getElementById('log-viewer');
+    // Only follow the tail if the user is already at the bottom, so
+    // auto-refresh doesn't yank the scroll position while they're reading.
+    const followTail = viewer.scrollHeight - viewer.scrollTop - viewer.clientHeight < 40;
+
     try {
         const params = new URLSearchParams({ lines, search, level });
-        const resp = await fetch('/api/logs?' + params);
+        const resp = await fetch('/api/logs?' + params, { headers: {'X-API-Key': API_KEY} });
         const data = await resp.json();
 
         const sizeMB = (data.file_size / (1024 * 1024)).toFixed(1);
         document.getElementById('log-info').textContent =
             `Showing ${data.showing} of ${data.total} lines · ${data.file} (${sizeMB} MB)`;
 
-        const viewer = document.getElementById('log-viewer');
         if (!data.lines.length) {
             viewer.innerHTML = '<span style="color: #666;">No log lines match your filters.</span>';
             return;
@@ -129,7 +188,7 @@ async function loadLogs() {
             return '<span style="' + cls + '">' + escapeHtml(line) + '</span>';
         }).join('\n');
 
-        viewer.scrollTop = viewer.scrollHeight;
+        if (followTail) viewer.scrollTop = viewer.scrollHeight;
     } catch (e) {
         document.getElementById('log-viewer').innerHTML =
             '<span style="color: var(--error);">Failed to load logs: ' + escapeHtml(e.message) + '</span>';
@@ -138,7 +197,7 @@ async function loadLogs() {
 
 async function loadApiStats() {
     try {
-        const resp = await fetch('/api/logs/stats');
+        const resp = await fetch('/api/logs/stats', { headers: {'X-API-Key': API_KEY} });
         const data = await resp.json();
         const today = data.today || {};
 

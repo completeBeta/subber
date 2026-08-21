@@ -77,7 +77,7 @@ if STATIC_DIR.exists():
 # ── API key auth (disabled by default — empty key = no auth) ──
 
 async def _require_write_auth(x_api_key: str = Header(None)):
-    """FastAPI dependency: require API key for write endpoints.
+    """FastAPI dependency: require API key for sensitive endpoints.
 
     If api_key is empty (default), all requests pass through.
     If set, requests must include matching X-API-Key header.
@@ -2711,6 +2711,7 @@ async def api_logs(
     lines: int = 200,
     search: str = "",
     level: str = "",
+    _=Depends(_require_write_auth),
 ):
     """Return recent log lines with optional search and level filter."""
     if not _LOG_FILE.exists():
@@ -2747,7 +2748,7 @@ async def api_logs(
 
 
 @app.get("/api/logs/download")
-async def api_logs_download():
+async def api_logs_download(_=Depends(_require_write_auth)):
     """Download the full log file."""
     if not _LOG_FILE.exists():
         return JSONResponse(content={"error": "Log file not found"}, status_code=404)
@@ -2759,7 +2760,7 @@ async def api_logs_download():
 
 
 @app.get("/api/logs/export")
-async def api_logs_export():
+async def api_logs_export(_=Depends(_require_write_auth)):
     """Export FULL log history (current + all rotated daily files) as one file.
 
     Files are concatenated oldest → newest. TimedRotatingFileHandler names
@@ -2928,7 +2929,7 @@ async def api_logs_diagnostics(_=Depends(_require_write_auth)):
 
 
 @app.get("/api/logs/stats")
-async def api_logs_stats():
+async def api_logs_stats(_=Depends(_require_write_auth)):
     """Return today's provider API call stats."""
     from .providers import provider_stats
     from .providers.opensubtitles import OpenSubtitlesProvider, USAGE_FILE
