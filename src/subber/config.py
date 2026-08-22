@@ -56,6 +56,14 @@ DEFAULTS = {
         "window_seconds": 60,    # intro/outro window scanned for ad/credit lines
         "patterns": [],          # extra case-insensitive regex patterns
     },
+    "asr": {
+        "mode": "off",               # "off" | "auto"  (auto = grab-tab fallback available)
+        "model": "large-v3-turbo",   # faster-whisper size alias or HF repo id
+        "language": "auto",          # "auto" or a whisper language code (ja, en, ...)
+        "timeout": 600,              # per-request seconds for the transcription endpoint
+        "max_audio_seconds": 3600,   # hard safety cap — abort if audio is longer
+        "backends": [],              # ordered failover: [{name, url, api_key, model}]
+    },
 
     "library": {
         "paths": [],
@@ -215,6 +223,10 @@ def library_settings() -> dict:
 
 def ad_removal_settings() -> dict:
     return get_section("ad_removal")
+
+
+def asr_settings() -> dict:
+    return get_section("asr")
 
 def build_provider_registry() -> "ProviderRegistry":
     """Build a ProviderRegistry from current config settings.
