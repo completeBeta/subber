@@ -1,12 +1,15 @@
 """Provider registry — searches all enabled providers in parallel, fallback-last."""
 
 import asyncio
+import logging
+import re
 from pathlib import Path
 
 from ..types import SubtitleResult
 from .base import SubtitleProvider
 from . import provider_stats
 
+_log = logging.getLogger("subber.providers")
 
 _VALID_SUB_EXTS = {".srt", ".ass", ".ssa", ".vtt"}
 
@@ -149,7 +152,7 @@ class ProviderRegistry:
             name_results_all = _filter_relevance(query, name_results_all)
 
         all_results = _merge_results(hash_results_all + name_results_all)
-        return all_results
+        return _filter_spam(all_results)
 
     async def download(
         self, result: SubtitleResult, output_dir: Path,
@@ -196,6 +199,45 @@ def _normalize(filename: str) -> str:
     base = filename.rsplit(".", 1)[0].lower() if "." in filename else filename.lower()
     base = re.sub(r"[._\- ]+", " ", base).strip()
     return base
+
+
+# Patterns that mark a provider result as a paid-subtitle scam/advert.
+# A real subtitle release name never carries a price, contact detail, or
+# these known scam brands. Compiled once at import.
+_SPAM_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"₹"), "rupee/price symbol"),
+    (re.compile(r"[$€£]\s?\d"), "currency symbol + amount"),
+    (re.compile(r"\b(?:usd|inr|eur|gbp)\s*\d", re.I), "currency code + amount"),
+    (re.compile(r"@(?:gmail|yahoo|outlook|hotmail|protonmail|icloud)\.com", re.I), "contact email"),
+    (re.compile(r"\b(?:whatsapp|telegram|paytm|phonepe|gpay|venmo|cashapp)\b", re.I), "payment/contact app"),
+    (re.compile(r"\bget a to z\b", re.I), "known scam brand 'Get A to Z'"),
+]
+
+
+def _filter_spam(results: list[SubtitleResult]) -> list[SubtitleResult]:
+    """Drop paid-subtitle scam/advert listings (e.g. 'Get A to Z … for ₹500 only').
+
+    Some providers surface "releases" whose real content is a "contact me to
+    buy the full file" note or a gated sample. They accumulate fake download
+    counts and outrank genuine subtitles. We scan each result's filename and
+    release_info for known spam markers and drop matches, logging each rejection
+    so we can diagnose exactly what was filtered.
+    """
+    kept: list[SubtitleResult] = []
+    for r in results:
+        haystack = f"{r.filename} {r.release_info or ''}"
+        reason = next(
+            (why for pat, why in _SPAM_PATTERNS if pat.search(haystack)),
+            None,
+        )
+        if reason:
+            _log.warning(
+                "Spam filter dropped %r from %s (%s)",
+                r.filename, r.provider, reason,
+            )
+        else:
+            kept.append(r)
+    return kept
 
 
 def _filter_relevance(query: str, results: list[SubtitleResult]) -> list[SubtitleResult]:
