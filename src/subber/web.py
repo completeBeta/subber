@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import re
 import subprocess
 import shutil
 import tempfile
@@ -1173,6 +1174,37 @@ async def api_download_sub(file_id: str, request: Request, _=Depends(_require_wr
 
 # ── Shared grab pipeline ──
 
+_SE_MARKER_RE = re.compile(r"S(\d{1,2})[ ._-]*E(\d{1,3})", re.IGNORECASE)
+
+
+def _candidate_matches_episode(filename: str, season, episode) -> bool:
+    """Return False only when the filename clearly identifies a DIFFERENT episode.
+
+    Conservative on purpose: filenames without episode markers pass through
+    (many providers use opaque names); only explicit SxxEyy markers that all
+    disagree with the target cause rejection. Mirrors library_pipeline's guard.
+    """
+    if season is None or episode is None:
+        return True
+    markers = _SE_MARKER_RE.findall(filename or "")
+    if not markers:
+        return True
+    for s, e in markers:
+        if int(s) == int(season) and int(e) == int(episode):
+            return True
+    return False
+
+
+def _is_english(lang: str) -> bool:
+    """True if a provider/track language code denotes English.
+
+    Providers disagree on case/format ("en", "EN", "eng", "English"); a plain
+    `== "en"` comparison treats "EN" as non-English and triggers a pointless
+    (and costly) EN→en LLM translation. Normalize before comparing.
+    """
+    return (lang or "").lower() in ("en", "eng", "english")
+
+
 async def _run_grab_pipeline(
     video_path: Path,
     video_filename: str,
@@ -1248,7 +1280,7 @@ async def _run_grab_pipeline(
         pipeline_result["embedded_langs"] = embedded_langs
 
         if best_embedded:
-            if best_embedded.language == "en":
+            if _is_english(best_embedded.language):
                 pipeline_result["steps"].append(f"Found embedded English subtitle ({best_embedded.release_info})")
                 if on_step:
                     on_step(pipeline_result["steps"][-1])
@@ -1263,7 +1295,7 @@ async def _run_grab_pipeline(
             _strip_ads(sub_path)
             pipeline_result["found"] = True
 
-            if best_embedded.language == "en":
+            if _is_english(best_embedded.language):
                 pipeline_result["output_path"] = str(sub_path)
             else:
                 pipeline_result["steps"].append("Translating via LLM...")
@@ -1277,20 +1309,70 @@ async def _run_grab_pipeline(
                 pipeline_result["model_used"] = trans_result[1]
 
         else:
-            # Step 2: Search providers
-            query = Path(video_filename).stem
-            _log.info("GRAB_PIPE no embedded subs, searching %d providers for '%s'", registry.count, sanitize_log(query))
-            pipeline_result["steps"].append(f"Searching {registry.count} providers for '{query}'...")
+            # Step 2: Search providers — mirror the library scan's matching so a
+            # raw release filename can't fuzzy-match the wrong show (e.g.
+            # "Shoushimin.Series.S02E01..." → "A Series of Unfortunate Events").
+            from .library_scanner import _clean_show_title
+            from .identify import identify as identify_show
+
+            clean_title = _clean_show_title(video_filename)
+            season = episode = None
+            se_m = re.search(r"[Ss](\d{1,2})[Ee](\d{1,3})", video_filename)
+            if se_m:
+                season = int(se_m.group(1))
+                episode = int(se_m.group(2))
+
+            # Search query candidates: clean title first, then canonical
+            # AniList/TMDB titles + synonyms (same as the scan).
+            search_queries = [clean_title]
+            lib_cfg = config.library_settings()
+            if lib_cfg.get("use_identification", True):
+                try:
+                    tmdb_key = lib_cfg.get("tmdb_api_key", "")
+                    prefer = lib_cfg.get("identify_prefer", "anilist")
+                    identity = await identify_show(clean_title, tmdb_api_key=tmdb_key, prefer=prefer)
+                    if identity.anilist_title_en and identity.anilist_title_en not in search_queries:
+                        search_queries.insert(0, identity.anilist_title_en)
+                    for term in identity.search_terms:
+                        if term not in search_queries:
+                            search_queries.append(term)
+                    _log.info("GRAB_PIPE identified '%s' → %s (anilist=%s)", sanitize_log(clean_title), identity.best_title, identity.anilist_id)
+                except Exception as e:
+                    _log.warning("GRAB_PIPE identification failed for '%s': %s", sanitize_log(clean_title), e)
+
+            _log.info("GRAB_PIPE no embedded subs, searching %d providers for '%s'", registry.count, sanitize_log(clean_title))
+            pipeline_result["steps"].append(f"Searching {registry.count} providers for '{clean_title}'...")
             if on_step:
                 on_step(pipeline_result["steps"][-1])
 
             results = []
             for try_lang in [language] + [l for l in config.selection_settings()["language_priority"] if l != language]:
-                results = await registry.search_all(
-                    query=query, language=try_lang, video_path=video_path,
-                )
+                for q in search_queries:
+                    if results:
+                        break
+                    results = await registry.search_all(
+                        query=q, language=try_lang, season=season, episode=episode, video_path=video_path,
+                    )
                 if results:
                     break
+
+            # Fallback: retry without season/episode (some releases number differently)
+            if not results and season is not None:
+                for q in search_queries:
+                    if results:
+                        break
+                    results = await registry.search_all(query=q, language=language, video_path=video_path)
+
+            # Episode guard (same as the scan): reject candidates that clearly
+            # identify a DIFFERENT episode than the one requested.
+            if results and season is not None and episode is not None:
+                before = len(results)
+                results = [r for r in results if _candidate_matches_episode(r.filename or "", season, episode)]
+                dropped = before - len(results)
+                if dropped:
+                    pipeline_result["steps"].append(f"Dropped {dropped} candidate(s) for wrong episode")
+                    if on_step:
+                        on_step(pipeline_result["steps"][-1])
 
             if not results:
                 # ASR fallback: transcribe the audio track when no subtitle exists
@@ -1319,7 +1401,7 @@ async def _run_grab_pipeline(
                                 on_step(pipeline_result["steps"][-1])
                             detected = (res.get("language") or "").lower()
                             pipeline_result["output_path"] = str(srt_path)
-                            if detected and detected != "en":
+                            if detected and not _is_english(detected):
                                 try:
                                     pipeline_result["needs_translation"] = True
                                     pipeline_result["steps"].append(f"Translating {detected} → en via LLM...")
@@ -1356,7 +1438,7 @@ async def _run_grab_pipeline(
             pipeline_result["found"] = True
 
             # Auto-translate if provider result is non-English
-            if best.language != "en":
+            if not _is_english(best.language):
                 pipeline_result["steps"].append(f"Translating {best.language.upper()} → en via LLM...")
                 if on_step:
                     on_step(pipeline_result["steps"][-1])

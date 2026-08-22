@@ -110,7 +110,8 @@ class ProviderRegistry:
         video_path: Path | None,
     ) -> list[SubtitleResult]:
         """Search a list of providers in parallel. Returns merged + deduped results."""
-        all_results: list[SubtitleResult] = []
+        hash_results_all: list[SubtitleResult] = []
+        name_results_all: list[SubtitleResult] = []
 
         # Hash search first (faster, more accurate)
         hash_tasks = []
@@ -123,7 +124,7 @@ class ProviderRegistry:
                 hash_results = await asyncio.gather(*hash_tasks, return_exceptions=True)
                 for res in hash_results:
                     if isinstance(res, list):
-                        all_results.extend(res)
+                        hash_results_all.extend(res)
 
         # Name search
         name_tasks = []
@@ -136,15 +137,18 @@ class ProviderRegistry:
             name_results = await asyncio.gather(*name_tasks, return_exceptions=True)
             for res in name_results:
                 if isinstance(res, list):
-                    all_results.extend(res)
+                    name_results_all.extend(res)
 
-        all_results = _merge_results(all_results)
-        # Relevance filter on name search: drop clearly-unrelated fuzzy matches
-        # (e.g. searching "demon lord" returning a Marvel one-shot). Only applies
-        # when we have a text query AND some results look relevant — if nothing
-        # matches, keep everything rather than return empty (avoid false-empty).
-        if query and not (video_path and video_path.is_file()):
-            all_results = _filter_relevance(query, all_results)
+        # Relevance filter on NAME-search results: drop clearly-unrelated fuzzy
+        # matches (e.g. "Shoushimin Series" returning "A Series of Unfortunate
+        # Events"). Hash-search results are exact matches by definition and are
+        # always kept. This must run regardless of whether a video file is
+        # present — previously it was gated on "no video file", which disabled
+        # it entirely for grab-tab uploads (where a file is always present).
+        if query:
+            name_results_all = _filter_relevance(query, name_results_all)
+
+        all_results = _merge_results(hash_results_all + name_results_all)
         return all_results
 
     async def download(
@@ -195,25 +199,25 @@ def _normalize(filename: str) -> str:
 
 
 def _filter_relevance(query: str, results: list[SubtitleResult]) -> list[SubtitleResult]:
-    """Drop clearly-unrelated name-search results, conservatively.
+    """Drop clearly-unrelated name-search results.
 
     A fuzzy provider match can return something completely unrelated to the
-    query (e.g. "demon lord" → a Marvel one-shot). We tokenize the query and
-    each result's filename/release, then:
-      - if NO result shares a meaningful token with the query, keep everything
-        (better a wrong result than an empty page — the user can see nothing matched),
-      - otherwise drop the results that share no token.
-
-    "Meaningful" = a token of length >= 3 that isn't a stopword, so "way" or
-    "the" don't cause a false match.
+    query (e.g. "Shoushimin Series" → "A Series of Unfortunate Events"). We
+    tokenize the query and each result's filename/release and keep only results
+    that share a DISTINCTIVE token (length >= 3, not a stopword) with the query.
+    If the query has distinctive tokens but NO result shares any, every result
+    is unrelated — drop them all rather than return a wrong show's subtitles.
+    Hash-search results are handled separately (never filtered) by the caller.
     """
     import re
 
     _STOP = {
         "the", "and", "for", "not", "you", "are", "with", "that", "this",
-        "from", "have", "was", "were", "will", "can", "are", "get", "got",
+        "from", "have", "was", "were", "will", "can", "get", "got",
         "all", "but", "out", "our", "who", "what", "when", "how", "way",
-        "one", "two", "episode", "season", "movie", "1080p", "720p", "2160p",
+        "one", "two", "episode", "season", "movie", "series", "show",
+        "become", "into", "1080p", "720p", "2160p", "480p", "x264", "x265",
+        "hevc", "web", "dl", "bluray", "hdtv", "webrip", "bdrip", "dvdrip",
     }
 
     def tokens(s: str) -> set[str]:
@@ -233,6 +237,6 @@ def _filter_relevance(query: str, results: list[SubtitleResult]) -> list[Subtitl
 
     scored = [(score(r), r) for r in results]
     if not any(s > 0 for s, _ in scored):
-        return results  # nothing matches — keep everything (avoid false-empty)
+        return []  # nothing shares a distinctive token — all unrelated
 
     return [r for s, r in scored if s > 0]
