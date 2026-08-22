@@ -282,6 +282,15 @@ async def api_get_config():
             elif isinstance(cookies, str) and cookies:
                 p["cookies"] = _mask(cookies)
 
+    # ASR: backend API keys
+    asr = display.get("asr")
+    if isinstance(asr, dict):
+        backends = asr.get("backends")
+        if isinstance(backends, list):
+            for b in backends:
+                if isinstance(b, dict) and b.get("api_key"):
+                    b["api_key"] = _mask(str(b["api_key"]))
+
     # Library: TMDB key + SMB mount credentials
     lib = display.get("library")
     if isinstance(lib, dict):

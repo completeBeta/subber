@@ -346,6 +346,44 @@
         </div>
     </div>
 
+    <!-- Audio Transcription (ASR) -->
+    <div class="settings-section">
+        <h3>🎙️ Audio Transcription (ASR)</h3>
+        <p class="hint" style="color: var(--text-muted); margin-bottom: 0.8rem;">
+            When no embedded subtitle and no provider match is found, transcribe the audio
+            track to text via a self-hosted Whisper server (OpenAI-compatible
+            <code>/v1/audio/transcriptions</code> endpoint, e.g. faster-whisper). Off by default.
+        </p>
+        <div class="form-group">
+            <label>Transcription mode</label>
+            <select id="cfg-asr-mode">
+                <option value="off">Off</option>
+                <option value="auto">Auto (grab-tab fallback)</option>
+            </select>
+            <div class="hint">"Auto" enables the "Transcribe audio if no subtitles found" checkbox on the Grab tab.</div>
+        </div>
+        <div class="form-group">
+            <label>Whisper model</label>
+            <input type="text" id="cfg-asr-model" placeholder="large-v3-turbo">
+            <div class="hint">faster-whisper model size (<code>large-v3-turbo</code> recommended) or a HuggingFace repo id.</div>
+        </div>
+        <div class="form-group">
+            <label>Language</label>
+            <input type="text" id="cfg-asr-language" placeholder="auto">
+            <div class="hint"><code>auto</code> to detect, or a Whisper language code (<code>en</code>, <code>ja</code>, <code>ko</code>, ...).</div>
+        </div>
+        <div class="form-group">
+            <label>Whisper server URL</label>
+            <input type="text" id="cfg-asr-url" placeholder="http://your-server:9000">
+            <div class="hint">OpenAI-compatible transcription endpoint. Leave blank to disable ASR.</div>
+        </div>
+        <div class="form-group">
+            <label>Whisper server API key</label>
+            <input type="password" id="cfg-asr-api-key" placeholder="(optional)" autocomplete="off">
+            <div class="hint">Only if your server requires a Bearer token.</div>
+        </div>
+    </div>
+
     <!-- Database Backups -->
     <div class="settings-section">
         <h3>💾 Database Backups</h3>
@@ -479,6 +517,15 @@ async function loadSettings() {
             document.getElementById('cfg-use-identification').checked = cfg.library.use_identification !== false;
             document.getElementById('cfg-identify-prefer').value = cfg.library.identify_prefer || 'anilist';
             document.getElementById('cfg-tmdb-api-key').value = cfg.library.tmdb_api_key || '';
+        }
+        // ASR settings
+        if (cfg.asr) {
+            document.getElementById('cfg-asr-mode').value = cfg.asr.mode || 'off';
+            document.getElementById('cfg-asr-model').value = cfg.asr.model || 'large-v3-turbo';
+            document.getElementById('cfg-asr-language').value = cfg.asr.language || 'auto';
+            const b0 = (cfg.asr.backends && cfg.asr.backends[0]) || {};
+            document.getElementById('cfg-asr-url').value = b0.url || '';
+            document.getElementById('cfg-asr-api-key').value = b0.api_key || '';
         }
         renderBackends(cfg.translation?.backends || []);
     } catch (e) {
@@ -749,6 +796,19 @@ async function saveSettings() {
             values: {
                 mode: document.getElementById('cfg-ad-removal-mode').value,
             }
+        },
+        {
+            section: 'asr',
+            values: (() => {
+                const url = document.getElementById('cfg-asr-url').value.trim();
+                const key = document.getElementById('cfg-asr-api-key').value.trim();
+                return {
+                    mode: document.getElementById('cfg-asr-mode').value,
+                    model: document.getElementById('cfg-asr-model').value.trim() || 'large-v3-turbo',
+                    language: document.getElementById('cfg-asr-language').value.trim() || 'auto',
+                    backends: url ? [{ name: 'remote', url: url, api_key: key }] : [],
+                };
+            })(),
         },
         {
             section: 'limits',
