@@ -74,6 +74,22 @@ ad_removal:
   window_seconds: 60            # intro/outro window scanned for ad/credit lines
   patterns: []                  # extra case-insensitive regex patterns
 
+# --- Audio Transcription (ASR) ---
+# Transcribe the audio track to a subtitle when no embedded subtitle or provider
+# match is found. Opt-in: mode must be "auto" AND the grab-tab "Transcribe audio
+# if no subtitles found" checkbox must be checked per upload.
+asr:
+  mode: off                     # off | auto
+  model: large-v3-turbo         # faster-whisper size alias or HF repo id (large-v3-turbo recommended)
+  language: auto                # auto, or a whisper language code (ja, en, ko, ...)
+  timeout: 600                  # per-request seconds for the transcription endpoint
+  max_audio_seconds: 3600       # hard safety cap — abort if the audio is longer
+  backends:                     # ordered failover — OpenAI-compatible /v1/audio/transcriptions servers
+    # - name: Whisper (Unraid)
+    #   url: http://192.168.1.50:8000
+    #   api_key: ""             # only if your server requires one
+    #   model: large-v3-turbo   # optional per-backend override
+
 # --- Library ---
 library:
   paths: []                      # Add your media directories here

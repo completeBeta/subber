@@ -1172,6 +1172,7 @@ async def _run_grab_pipeline(
     sync: bool,
     registry: "ProviderRegistry",
     on_step=None,
+    transcribe: bool = False,
 ) -> dict:
     """Run the grab pipeline on a single video. Returns result dict."""
     pipeline_result = {
@@ -1283,6 +1284,54 @@ async def _run_grab_pipeline(
                     break
 
             if not results:
+                # ASR fallback: transcribe the audio track when no subtitle exists
+                # anywhere (embedded or provider). Opt-in per request (grab-tab
+                # checkbox) AND globally (asr.mode == "auto" + backends configured).
+                if transcribe:
+                    asr_cfg = config.asr_settings()
+                    if asr_cfg.get("mode", "off") == "auto" and asr_cfg.get("backends"):
+                        pipeline_result["steps"].append("No subtitles found — transcribing audio via ASR...")
+                        if on_step:
+                            on_step(pipeline_result["steps"][-1])
+                        _log.info("GRAB_PIPE ASR fallback for %s", sanitize_log(video_filename))
+                        try:
+                            from .transcriber import transcribe_video
+                            srt_path = tmp_dir / "transcribed.srt"
+                            loop = asyncio.get_running_loop()
+                            res = await loop.run_in_executor(
+                                None, transcribe_video, video_path, srt_path, asr_cfg,
+                            )
+                            _strip_ads(srt_path)
+                            pipeline_result["found"] = True
+                            pipeline_result["steps"].append(
+                                f"Transcribed {res.get('segments')} segment(s) via ASR ({res.get('model')})"
+                            )
+                            if on_step:
+                                on_step(pipeline_result["steps"][-1])
+                            detected = (res.get("language") or "").lower()
+                            pipeline_result["output_path"] = str(srt_path)
+                            if detected and detected != "en":
+                                try:
+                                    pipeline_result["needs_translation"] = True
+                                    pipeline_result["steps"].append(f"Translating {detected} → en via LLM...")
+                                    if on_step:
+                                        on_step(pipeline_result["steps"][-1])
+                                    trans_result = await loop.run_in_executor(
+                                        None, _do_translate, srt_path, detected,
+                                    )
+                                    pipeline_result["output_path"] = str(trans_result[0])
+                                    pipeline_result["model_used"] = trans_result[1]
+                                except Exception as te:
+                                    _log.warning("[ASR] translation failed (%s), keeping raw transcript: %s", detected, te)
+                                    pipeline_result["steps"].append("Translation failed — keeping raw transcript")
+                                    if on_step:
+                                        on_step(pipeline_result["steps"][-1])
+                            return pipeline_result
+                        except Exception as e:
+                            _log.warning("[ASR] transcription failed for %s: %s", sanitize_log(video_filename), e)
+                            pipeline_result["steps"].append(f"ASR transcription failed: {e}")
+                            if on_step:
+                                on_step(pipeline_result["steps"][-1])
                 pipeline_result["steps"].append("No subtitles found")
                 if on_step:
                     on_step(pipeline_result["steps"][-1])
@@ -1431,6 +1480,7 @@ async def _run_grab_job(
     language: str,
     sync: bool,
     registry: "ProviderRegistry",
+    transcribe: bool = False,
 ) -> None:
     """Run the grab pipeline in background, updating _grab_jobs as it goes."""
     print(f"[GRAB] _run_grab_job ENTER: {job_id} {video_filename}", flush=True)
@@ -1449,6 +1499,7 @@ async def _run_grab_job(
         result = await _run_grab_pipeline(
             video_path, video_filename, tmp_dir, language, sync, registry,
             on_step=lambda step: _grab_step(job_id, step),
+            transcribe=transcribe,
         )
 
         # Steps already recorded live via _grab_step callbacks — no merge needed
@@ -1498,6 +1549,7 @@ async def api_grab(request: Request, _=Depends(_require_write_auth),
     language: str = Form("en"),
     sync: bool = Form(True),
     provider: str = Form(""),
+    transcribe: bool = Form(False),
 ):
     """Full pipeline: stream to disk → return job_id → process in background.
     
@@ -1540,7 +1592,7 @@ async def api_grab(request: Request, _=Depends(_require_write_auth),
     _grab_step(job_id, "File received — starting pipeline...")
 
     # Run pipeline in background
-    task = asyncio.create_task(_run_grab_job(job_id, video_path, original_name, tmp_dir, language, sync, registry))
+    task = asyncio.create_task(_run_grab_job(job_id, video_path, original_name, tmp_dir, language, sync, registry, transcribe))
     print(f"[GRAB] Task created for {job_id}, task name: {task.get_name()}", flush=True)
 
     return {"job_id": job_id}

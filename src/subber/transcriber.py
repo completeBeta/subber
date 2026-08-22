@@ -135,6 +135,21 @@ def segments_to_srt(segments: list[dict]) -> str:
     return "\n".join(out)
 
 
+_LANG_ALIASES = {
+    "english": "en", "japanese": "ja", "korean": "ko", "chinese": "zh",
+    "spanish": "es", "french": "fr", "german": "de", "italian": "it",
+    "portuguese": "pt", "russian": "ru", "arabic": "ar",
+    "en": "en", "ja": "ja", "ko": "ko", "zh": "zh", "es": "es",
+    "fr": "fr", "de": "de", "it": "it", "pt": "pt", "ru": "ru", "ar": "ar",
+}
+
+
+def _normalize_language(lang: str) -> str:
+    """Map Whisper language names (e.g. 'japanese') to ISO codes (e.g. 'ja')."""
+    l = (lang or "").strip().lower()
+    return _LANG_ALIASES.get(l, l)
+
+
 def transcribe_video(video_path: Path, out_srt: Path, asr_cfg: dict) -> dict:
     """Full pipeline: extract audio -> transcribe -> write SRT.
 
@@ -171,4 +186,5 @@ def transcribe_video(video_path: Path, out_srt: Path, asr_cfg: dict) -> dict:
         "segments": len(segments),
         "duration_s": duration,
         "model": payload.get("model") or model,
+        "language": _normalize_language(payload.get("language") or ""),
     }

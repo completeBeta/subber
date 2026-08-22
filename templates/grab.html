@@ -30,9 +30,12 @@
             </button>
         </div>
 
-        <div class="grab-options" style="margin-top: 1rem; display: flex; gap: 1.5rem; align-items: center;">
+        <div class="grab-options" style="margin-top: 1rem; display: flex; gap: 1.5rem; align-items: center; flex-wrap: wrap;">
             <label class="checkbox-label" style="display: flex; align-items: center; gap: 0.3rem; cursor: pointer;">
                 <input type="checkbox" id="opt-sync" checked> Auto-sync with ffsubsync
+            </label>
+            <label class="checkbox-label" style="display: flex; align-items: center; gap: 0.3rem; cursor: pointer;" title="If no embedded subtitle and no provider match, transcribe the audio track to text (requires ASR configured in Settings)">
+                <input type="checkbox" id="opt-transcribe"> Transcribe audio if no subtitles found
             </label>
         </div>
 
@@ -504,6 +507,7 @@ async function processSequential(files) {
         const form = new FormData();
         form.append('video_file', file);
         form.append('sync', sync);
+        form.append('transcribe', document.getElementById('opt-transcribe').checked);
 
         try {
             const jobId = await new Promise((resolve, reject) => {
