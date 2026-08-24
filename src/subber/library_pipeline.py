@@ -1052,22 +1052,9 @@ def _has_usable_dialogue(sub_path: Path) -> bool:
 
 
 def _detect_sub_language(sub_path: Path) -> str:
-    """Detect the language of a subtitle file from filename or content."""
-    # Check filename for language code
-    stem = sub_path.stem
-    parts = stem.split(".")
-    if len(parts) >= 2:
-        potential_lang = parts[-1].lower()
-        if len(potential_lang) <= 5 and potential_lang not in {"en", "eng"}:
-            return potential_lang
-
-    # Fallback: use langdetect on content
-    try:
-        from .parser import detect_language
-        lang = detect_language(sub_path)
-        return lang or "ja"
-    except Exception:
-        return "ja"
+    """Detect a subtitle's language — see parser.detect_subtitle_language."""
+    from .parser import detect_subtitle_language
+    return detect_subtitle_language(sub_path)
 
 
 def _estimate_cost(sub_path: Path, model: str) -> float:
@@ -1300,10 +1287,14 @@ async def _search_download_and_process(
     except Exception as e:
         logger.warning("Ad removal failed for %s: %s", sanitize_log(downloaded_path.name), e)
 
-    # Check if downloaded sub is English
+    # Decide whether the downloaded sub needs translation. Only translate when
+    # we've positively identified a non-English language — "unknown" (no
+    # filename marker AND an inconclusive content sample) is treated as
+    # English, which is safer than mangling an English sub with a pointless
+    # EN→en translation.
     sub_lang = _detect_sub_language(downloaded_path)
-    if sub_lang in ENGLISH_LANGS:
-        # English sub — sync and write
+    if sub_lang in ENGLISH_LANGS or sub_lang == "unknown":
+        # English sub (or undetermined) — sync and write
         output_path = video_path.with_suffix(".en.srt")
         shutil.copy2(downloaded_path, output_path)
 

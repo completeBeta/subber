@@ -1,0 +1,107 @@
+"""Tests for subtitle language detection (parser.detect_subtitle_language & helpers).
+
+Regression coverage for the ".zip"-as-language bug: SubDL names English subs
+like "…English.EN.zip.ass", and the old detector read the last token ("zip")
+as a language code, translating thousands of English subs pointlessly.
+"""
+
+from subber.parser import detect_subtitle_language, lang_from_filename
+
+
+# ── filename detection (pure, no I/O) ──
+
+def test_filename_english_variants():
+    for name in [
+        "Show.S01E01.en.srt",
+        "Show.S01E01.eng.srt",
+        "Show.S01E01.English.srt",
+        "Show.S01E01.EN.srt",
+        "Show.S01E01.english.srt",
+    ]:
+        assert lang_from_filename(name) == "en", name
+
+
+def test_filename_zip_is_not_a_language():
+    # The exact SubDL naming that caused the bug.
+    assert lang_from_filename(
+        "I.May.Be.A.Guild.Receptionist.But.Ill.Solo.Any.Boss.To.Clock.Out.On.Time."
+        "S01E11.CR.WEB-DL.English.EN.zip.ass"
+    ) == "en"
+    assert lang_from_filename(
+        "mahou-shoujo-lyrical-nanoha-vivid_english-1522947.zip.ass"
+    ) == "en"
+    assert lang_from_filename(
+        "Tojima.Wants.To.Be.A.Kamen.Rider.S01E13.CR.WEB-DL.English.EN.zip.ass"
+    ) == "en"
+
+
+def test_filename_no_language_marker_returns_none():
+    # "zip", "san1317853", "season557025", quality tags — none are languages.
+    assert lang_from_filename("SUBDL.com::osomatsu.san1317853.zip.ass") is None
+    assert lang_from_filename("claymore.kureimoa..first.season557025.zip.srt") is None
+    assert lang_from_filename("Show.720p.x264.HDTV.srt") is None
+    assert lang_from_filename("Show.S01E01.srt") is None
+
+
+def test_filename_quality_tags_ignored():
+    assert lang_from_filename("Show.1080p.BluRay.x264-AAC.srt") is None
+    assert lang_from_filename("Show.WEB-DL.CR.srt") is None
+
+
+def test_filename_foreign_languages():
+    assert lang_from_filename("Show.S01E01.ja.srt") == "ja"
+    assert lang_from_filename("Show.S01E01.japanese.srt") == "ja"
+    assert lang_from_filename("Show.S01E01.fr.srt") == "fr"
+    assert lang_from_filename("Show.S01E01.spanish.srt") == "es"
+    assert lang_from_filename("Show.S01E01.zh-cn.srt") == "zh"
+
+
+# ── content detection (uses langdetect) ──
+
+EN_SRT = """1
+00:00:01,000 --> 00:00:03,000
+Hello, how are you doing today?
+
+2
+00:00:03,000 --> 00:00:05,000
+I am going to the store to buy some groceries.
+
+3
+00:00:05,000 --> 00:00:07,000
+Would you like to come with me?
+"""
+
+JA_SRT = """1
+00:00:01,000 --> 00:00:03,000
+こんにちは、お元気ですか。
+
+2
+00:00:03,000 --> 00:00:05,000
+私は今から店に行って買い物をします。
+
+3
+00:00:05,000 --> 00:00:07,000
+一緒に来ませんか。
+"""
+
+
+def _write(tmp_path, name, text):
+    p = tmp_path / name
+    p.write_text(text, encoding="utf-8")
+    return p
+
+
+def test_detect_subtitle_language_content_english(tmp_path):
+    # No language marker in filename → falls back to content sampling.
+    p = _write(tmp_path, "Show.S01E01.srt", EN_SRT)
+    assert detect_subtitle_language(p) == "en"
+
+
+def test_detect_subtitle_language_content_japanese(tmp_path):
+    p = _write(tmp_path, "Show.S01E01.srt", JA_SRT)
+    assert detect_subtitle_language(p) == "ja"
+
+
+def test_detect_subtitle_language_empty_file_is_unknown(tmp_path):
+    p = _write(tmp_path, "Show.S01E01.srt", "")
+    assert detect_subtitle_language(p) == "unknown"

@@ -1,5 +1,6 @@
 """Subtitle format parser — reads SRT, ASS, VTT into structured data."""
 
+import re
 from pathlib import Path
 
 import pysubs2
@@ -81,3 +82,86 @@ def read_raw_texts(path: Path) -> list[str]:
             and "-->" not in ln
             and not ln.isdigit()
         ]
+
+
+# Token → ISO 639-1 code for the language markers providers put in filenames.
+# The download path uses this (plus a content sample) instead of guessing from
+# the last filename token, because SubDL names subs like "…English.EN.zip.ass" —
+# the last token ("zip") is a packaging/quality tag, not a language.
+LANG_TOKEN_TO_CODE = {
+    "en": "en", "eng": "en", "english": "en", "englishcc": "en",
+    "ja": "ja", "jap": "ja", "jpn": "ja", "japanese": "ja",
+    "fr": "fr", "fra": "fr", "fre": "fr", "french": "fr",
+    "de": "de", "ger": "de", "deu": "de", "german": "de",
+    "es": "es", "spa": "es", "spanish": "es",
+    "it": "it", "ita": "it", "italian": "it",
+    "pt": "pt", "por": "pt", "portuguese": "pt", "pt-br": "pt", "ptbr": "pt",
+    "zh": "zh", "chi": "zh", "zho": "zh", "chinese": "zh", "cn": "zh",
+    "zh-cn": "zh", "zhcn": "zh", "zh-tw": "zh", "zhtw": "zh",
+    "ko": "ko", "kor": "ko", "korean": "ko",
+    "ru": "ru", "rus": "ru", "russian": "ru",
+    "ar": "ar", "ara": "ar", "arabic": "ar",
+    "nl": "nl", "dut": "nl", "nld": "nl", "dutch": "nl",
+    "pl": "pl", "pol": "pl", "polish": "pl",
+    "tr": "tr", "tur": "tr", "turkish": "tr",
+    "sv": "sv", "swe": "sv", "swedish": "sv",
+    "no": "no", "nor": "no", "norwegian": "no",
+    "da": "da", "dan": "da", "danish": "da",
+    "fi": "fi", "fin": "fi", "finnish": "fi",
+    "el": "el", "gre": "el", "ell": "el", "greek": "el",
+    "he": "he", "heb": "he", "hebrew": "he",
+    "hi": "hi", "hin": "hi", "hindi": "hi",
+    "th": "th", "tha": "th", "thai": "th",
+    "vi": "vi", "vie": "vi", "vietnamese": "vi",
+    "id": "id", "ind": "id", "indonesian": "id",
+    "ms": "ms", "msa": "ms", "malay": "ms",
+    "cs": "cs", "cze": "cs", "ces": "cs", "czech": "cs",
+    "hu": "hu", "hun": "hu", "hungarian": "hu",
+    "ro": "ro", "rum": "ro", "ron": "ro", "romanian": "ro",
+    "uk": "uk", "ukr": "uk", "ukrainian": "uk",
+    "bg": "bg", "bul": "bg", "bulgarian": "bg",
+    "ca": "ca", "cat": "ca", "catalan": "ca",
+    "fa": "fa", "per": "fa", "fas": "fa", "persian": "fa", "farsi": "fa",
+    "tl": "tl", "fil": "tl", "tagalog": "tl", "filipino": "tl",
+    "sr": "sr", "srp": "sr", "serbian": "sr",
+    "hr": "hr", "hrv": "hr", "croatian": "hr",
+    "sk": "sk", "slk": "sk", "slovak": "sk",
+    "sl": "sl", "slv": "sl", "slovenian": "sl",
+}
+
+
+def lang_from_filename(name: str) -> str | None:
+    """Extract a language code from a filename's tokens, ignoring packaging /
+    quality tags ('zip', '720p', 'x264', …) that are not languages."""
+    for token in re.split(r"[^a-zA-Z0-9]+", name.lower()):
+        if token in LANG_TOKEN_TO_CODE:
+            return LANG_TOKEN_TO_CODE[token]
+    return None
+
+
+def lang_from_content(path: Path, max_lines: int = 25) -> str | None:
+    """Sample a few dialogue lines and detect the language. Used only when the
+    filename carries no language marker, to confirm the language from the
+    actual speech before deciding to translate."""
+    lines = [ln.strip() for ln in read_raw_texts(path) if ln and ln.strip()]
+    if not lines:
+        return None
+    sample = "\n".join(lines[:max_lines])[:2000]
+    if len(sample) < 20:
+        return None
+    code = (detect_language(sample) or "").lower()
+    return code if code and code not in {"unknown", "und"} else None
+
+
+def detect_subtitle_language(path: Path) -> str:
+    """Detect a subtitle's language: filename marker first, then a content
+    sample of a few dialogue lines. Returns an ISO 639-1 code, or 'unknown'
+    when neither source is conclusive.
+
+    Never trusts a bare trailing token — SubDL and friends ship names like
+    '…English.EN.zip.ass', where 'zip' is packaging, not a language.
+    """
+    lang = lang_from_filename(path.name)
+    if lang:
+        return lang
+    return lang_from_content(path) or "unknown"
