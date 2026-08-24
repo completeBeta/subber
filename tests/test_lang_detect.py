@@ -6,6 +6,7 @@ as a language code, translating thousands of English subs pointlessly.
 """
 
 from subber.parser import detect_subtitle_language, lang_from_filename
+from subber.translator import Translator
 
 
 # ── filename detection (pure, no I/O) ──
@@ -105,3 +106,24 @@ def test_detect_subtitle_language_content_japanese(tmp_path):
 def test_detect_subtitle_language_empty_file_is_unknown(tmp_path):
     p = _write(tmp_path, "Show.S01E01.srt", "")
     assert detect_subtitle_language(p) == "unknown"
+
+
+# ── LLM language confirmation (response parsing, no network) ──
+
+def test_identify_language_parses_clean_code(monkeypatch):
+    t = Translator(api_base="http://fake", api_key="x", model="test")
+    monkeypatch.setattr(t, "_call_api", lambda messages: "ja")
+    assert t.identify_language("こんにちは") == "ja"
+
+
+def test_identify_language_skips_filler_words(monkeypatch):
+    # Verbose reply — must NOT return "is"/"to"/"the", only a real code.
+    t = Translator(api_base="http://fake", api_key="x", model="test")
+    monkeypatch.setattr(t, "_call_api", lambda messages: "The language is English (en).")
+    assert t.identify_language("hello world") == "en"
+
+
+def test_identify_language_empty_response_is_unknown(monkeypatch):
+    t = Translator(api_base="http://fake", api_key="x", model="test")
+    monkeypatch.setattr(t, "_call_api", lambda messages: "")
+    assert t.identify_language("...") == "unknown"

@@ -4,6 +4,7 @@ Talks to any OpenAI-compatible API (DeepSeek cloud, local llama.cpp server, etc.
 Uses httpx for HTTP calls — no vendor SDK dependency.
 """
 
+import re
 import time
 from pathlib import Path
 from typing import Callable
@@ -214,6 +215,33 @@ class Translator:
         raise RuntimeError(
             f"Translation API call failed after {self.max_retries} attempts"
         ) from last_error
+
+    def identify_language(self, text: str) -> str:
+        """Identify the language of a subtitle text sample via the LLM.
+
+        Used as a last-resort confirmation when neither the filename nor
+        langdetect could determine the language. Returns a 2-letter ISO 639-1
+        code (e.g. 'en', 'ja') or 'unknown'.
+        """
+        system_prompt = (
+            "You are a language identification expert. Identify the language of "
+            "the subtitle lines below. Reply with ONLY the 2-letter ISO 639-1 "
+            "language code (for example: en, ja, fr, de, es, it, pt, zh, ko, ru, "
+            "ar). Output nothing else."
+        )
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": text},
+        ]
+        raw = self._call_api(messages)
+        text = raw.strip().lower()
+        # Return the first 2-letter token that is a known language code, so a
+        # verbose reply ("the language is English") can't return a filler word
+        # like "is"/"to" instead of the actual code.
+        for tok in re.findall(r"\b[a-z]{2}\b", text):
+            if tok in _LANG_NAMES:
+                return tok
+        return "unknown"
 
 
 

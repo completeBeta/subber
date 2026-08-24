@@ -1057,6 +1057,44 @@ def _detect_sub_language(sub_path: Path) -> str:
     return detect_subtitle_language(sub_path)
 
 
+async def _confirm_language(sub_path: Path) -> str:
+    """Confirm a subtitle's language via the LLM when filename + langdetect are
+    inconclusive. Samples a few dialogue lines and asks the translation backend
+    to identify the language. Returns an ISO 639-1 code or 'unknown'."""
+    from .parser import read_raw_texts
+    lines = [ln.strip() for ln in read_raw_texts(sub_path) if ln and ln.strip()]
+    if not lines:
+        return "unknown"
+    sample = "\n".join(lines[:25])[:1500]
+
+    backends = subber_config.translation_backends()
+    if not backends:
+        return "unknown"
+
+    loop = asyncio.get_running_loop()
+    for backend in backends:
+        try:
+            translator = Translator(
+                api_base=backend["api_base"],
+                api_key=backend.get("api_key", ""),
+                model=backend["model"],
+                max_tokens=32,
+                max_retries=1,
+                timeout=60.0,
+            )
+            raw = await loop.run_in_executor(None, translator.identify_language, sample)
+            code = (raw or "").strip().lower()
+            if len(code) == 2 and code.isalpha():
+                return code
+        except Exception as e:
+            logger.warning(
+                "Language confirmation backend %s failed: %s",
+                backend.get("name"), e,
+            )
+            continue
+    return "unknown"
+
+
 def _estimate_cost(sub_path: Path, model: str) -> float:
     """Estimate translation cost from configurable pricing.
 
@@ -1287,14 +1325,20 @@ async def _search_download_and_process(
     except Exception as e:
         logger.warning("Ad removal failed for %s: %s", sanitize_log(downloaded_path.name), e)
 
-    # Decide whether the downloaded sub needs translation. Only translate when
-    # we've positively identified a non-English language — "unknown" (no
-    # filename marker AND an inconclusive content sample) is treated as
-    # English, which is safer than mangling an English sub with a pointless
-    # EN→en translation.
+    # Decide whether the downloaded sub needs translation. Confirm the language
+    # rather than assuming it: filename marker first, then langdetect, then the
+    # LLM. Translate only when a non-English language is positively identified.
     sub_lang = _detect_sub_language(downloaded_path)
+    if sub_lang == "unknown":
+        sub_lang = await _confirm_language(downloaded_path)
+    if sub_lang == "unknown":
+        logger.warning(
+            "Language unconfirmed for %s (filename + langdetect + LLM all "
+            "inconclusive) — saving as-is without translation",
+            sanitize_log(downloaded_path.name),
+        )
     if sub_lang in ENGLISH_LANGS or sub_lang == "unknown":
-        # English sub (or undetermined) — sync and write
+        # English (or truly unconfirmable) — sync and write as-is
         output_path = video_path.with_suffix(".en.srt")
         shutil.copy2(downloaded_path, output_path)
 
