@@ -344,6 +344,12 @@
                 <input type="checkbox" id="cfg-dry-run-default" checked> Default to Dry Run (recommended)
             </label>
         </div>
+        <div class="form-group">
+            <label class="checkbox-label" style="display: flex; align-items: center; gap: 0.3rem; cursor: pointer;">
+                <input type="checkbox" id="cfg-asr-fallback"> Transcribe audio when no subtitle found (library scans)
+            </label>
+            <div class="hint">When a scan finds no embedded subtitle and no provider match, transcribe the audio via ASR (requires ASR enabled below).</div>
+        </div>
     </div>
 
     <!-- Audio Transcription (ASR) -->
@@ -514,6 +520,7 @@ async function loadSettings() {
             document.getElementById('cfg-scan-interval').value = cfg.library.scan_interval_hours || 0;
             document.getElementById('cfg-ad-removal-mode').value = (cfg.ad_removal && cfg.ad_removal.mode) || 'off';
             document.getElementById('cfg-dry-run-default').checked = cfg.library.dry_run_default !== false;
+            document.getElementById('cfg-asr-fallback').checked = cfg.library.asr_fallback === true;
             document.getElementById('cfg-use-identification').checked = cfg.library.use_identification !== false;
             document.getElementById('cfg-identify-prefer').value = cfg.library.identify_prefer || 'anilist';
             document.getElementById('cfg-tmdb-api-key').value = cfg.library.tmdb_api_key || '';
@@ -786,6 +793,7 @@ async function saveSettings() {
                 max_concurrent: parseInt(document.getElementById('cfg-max-concurrent').value) || 8,
                 scan_interval_hours: parseInt(document.getElementById('cfg-scan-interval').value) || 0,
                 dry_run_default: document.getElementById('cfg-dry-run-default').checked,
+                asr_fallback: document.getElementById('cfg-asr-fallback').checked,
                 use_identification: document.getElementById('cfg-use-identification').checked,
                 identify_prefer: document.getElementById('cfg-identify-prefer').value,
                 tmdb_api_key: document.getElementById('cfg-tmdb-api-key').value,

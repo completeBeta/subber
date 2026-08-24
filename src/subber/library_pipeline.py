@@ -582,8 +582,12 @@ async def _process_file(record: dict, scan_id: int, drift_threshold_ms: int) -> 
                     )
 
         elif sub_status == "none":
-            # No subtitles at all — search providers
+            # No subtitles at all — search providers, then try ASR fallback
             result = await _search_download_and_process(file_path, record, drift_threshold_ms)
+            if not result.get("success"):
+                asr_result = await _try_asr_fallback(file_path, drift_threshold_ms)
+                if asr_result is not None:
+                    result = asr_result
             cost = result.get("cost", 0)
             library_db.update_file_status(
                 file_id, status="done" if result.get("success") else "failed",
@@ -1093,6 +1097,83 @@ async def _confirm_language(sub_path: Path) -> str:
             )
             continue
     return "unknown"
+
+
+async def _asr_transcribe(file_path: Path, drift_threshold_ms: int) -> dict:
+    """Transcribe a video's audio via ASR (library fallback). Assumes the caller
+    already confirmed ASR is enabled + configured. Returns a result dict like
+    _search_download_and_process."""
+    from .transcriber import transcribe_video
+    asr_cfg = subber_config.asr_settings()
+    out_srt = file_path.with_suffix(".en.srt")
+
+    loop = asyncio.get_running_loop()
+    res = await loop.run_in_executor(None, transcribe_video, file_path, out_srt, asr_cfg)
+
+    # Optional ad/credit removal on the transcript
+    try:
+        ad_cfg = subber_config.ad_removal_settings()
+        if ad_cfg.get("mode", "off") != "off":
+            from .ad_removal import remove_ads
+            remove_ads(
+                out_srt,
+                mode=ad_cfg.get("mode", "adverts"),
+                window_seconds=int(ad_cfg.get("window_seconds", 60) or 60),
+                extra_patterns=ad_cfg.get("patterns") or [],
+            )
+    except Exception:
+        pass
+
+    detected = (res.get("language") or "").lower()
+    model_used = res.get("model") or asr_cfg.get("model", "large-v3-turbo")
+
+    # Non-English transcript → translate to English
+    if detected and detected not in ("en", "eng", "english"):
+        try:
+            trans = await _translate_and_sync(file_path, out_srt, drift_threshold_ms)
+            return {
+                "success": True,
+                "action": "transcribed_and_translated",
+                "output_path": trans["output_path"],
+                "provider": "asr",
+                "model_used": trans["model_used"],
+                "cost": trans["cost"],
+                "drift_ms": trans.get("drift_ms"),
+            }
+        except Exception as e:
+            logger.warning(
+                "[LIBRARY] ASR translation failed for %s, keeping raw transcript: %s",
+                sanitize_log(file_path.name), e,
+            )
+
+    return {
+        "success": True,
+        "action": "transcribed",
+        "output_path": str(out_srt),
+        "provider": "asr",
+        "model_used": model_used,
+        "cost": 0.0,
+        "drift_ms": None,
+    }
+
+
+async def _try_asr_fallback(file_path: Path, drift_threshold_ms: int) -> dict | None:
+    """Transcribe audio via ASR when no subtitle exists. Returns a result dict,
+    or None when ASR is disabled (library.asr_fallback off) or unconfigured."""
+    lib_cfg = subber_config.get_section("library") or {}
+    if not lib_cfg.get("asr_fallback", False):
+        return None
+    asr_cfg = subber_config.asr_settings()
+    if asr_cfg.get("mode", "off") != "auto" or not asr_cfg.get("backends"):
+        return None
+    try:
+        return await _asr_transcribe(file_path, drift_threshold_ms)
+    except Exception as e:
+        logger.warning(
+            "[LIBRARY] ASR fallback failed for %s: %s",
+            sanitize_log(file_path.name), e,
+        )
+        return {"success": False, "action": "failed", "error": f"ASR failed: {e}"}
 
 
 def _estimate_cost(sub_path: Path, model: str) -> float:

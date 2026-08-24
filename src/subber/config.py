@@ -71,6 +71,7 @@ DEFAULTS = {
         "max_concurrent": 5,
         "scan_interval_hours": 6,
         "dry_run_default": True,
+        "asr_fallback": False,       # transcribe audio via ASR when no subtitle exists
         "providers": {
             "enabled": ["embedded", "subdl", "gestdown"],
         },
