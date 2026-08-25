@@ -879,6 +879,7 @@ async def _translate_and_sync(
     video_path: Path,
     sub_path: Path,
     drift_threshold_ms: int,
+    source_lang: str | None = None,
 ) -> dict:
     """Translate a foreign subtitle to English and optionally sync.
 
@@ -886,8 +887,12 @@ async def _translate_and_sync(
     """
     loop = asyncio.get_running_loop()
 
-    # Detect source language from filename or content
-    source_lang = _detect_sub_language(sub_path)
+    # Detect source language from filename or content, unless the caller already
+    # knows it (the ASR path passes Whisper's detected language explicitly, since
+    # the raw transcript carries a neutral filename that would otherwise read as
+    # English via the ".en" suffix).
+    if source_lang is None:
+        source_lang = _detect_sub_language(sub_path)
 
     # Output path: same directory as the video, matching the episode name
     # e.g. Show.Name.S01E01.{source_lang}.srt -> Show.Name.S01E01.en.srt
@@ -1105,10 +1110,14 @@ async def _asr_transcribe(file_path: Path, drift_threshold_ms: int) -> dict:
     _search_download_and_process."""
     from .transcriber import transcribe_video
     asr_cfg = subber_config.asr_settings()
-    out_srt = file_path.with_suffix(".en.srt")
+    # Write the raw transcript to a NEUTRAL name first. We don't know the audio's
+    # language until Whisper reports it, and a premature ".en.srt" name would make
+    # _translate_and_sync's filename-based language detection read the transcript
+    # as English — so foreign audio (Japanese/Korean/…) would never get translated.
+    raw_srt = file_path.with_suffix(".raw.srt")
 
     loop = asyncio.get_running_loop()
-    res = await loop.run_in_executor(None, transcribe_video, file_path, out_srt, asr_cfg)
+    res = await loop.run_in_executor(None, transcribe_video, file_path, raw_srt, asr_cfg)
 
     # Optional ad/credit removal on the transcript
     try:
@@ -1116,7 +1125,7 @@ async def _asr_transcribe(file_path: Path, drift_threshold_ms: int) -> dict:
         if ad_cfg.get("mode", "off") != "off":
             from .ad_removal import remove_ads
             remove_ads(
-                out_srt,
+                raw_srt,
                 mode=ad_cfg.get("mode", "adverts"),
                 window_seconds=int(ad_cfg.get("window_seconds", 60) or 60),
                 extra_patterns=ad_cfg.get("patterns") or [],
@@ -1126,11 +1135,27 @@ async def _asr_transcribe(file_path: Path, drift_threshold_ms: int) -> dict:
 
     detected = (res.get("language") or "").lower()
     model_used = res.get("model") or asr_cfg.get("model", "large-v3-turbo")
+    final_srt = file_path.with_suffix(".en.srt")
 
-    # Non-English transcript → translate to English
+    # Whisper couldn't identify the language → don't silently assume English;
+    # confirm from the transcript content before deciding.
+    if not detected or detected in ("unknown", "und", "auto"):
+        try:
+            detected = await _confirm_language(raw_srt)
+        except Exception:
+            detected = ""
+
+    # Non-English transcript → translate to English (passing Whisper's detected
+    # language explicitly so the neutral filename can't short-circuit it).
     if detected and detected not in ("en", "eng", "english"):
         try:
-            trans = await _translate_and_sync(file_path, out_srt, drift_threshold_ms)
+            trans = await _translate_and_sync(
+                file_path, raw_srt, drift_threshold_ms, source_lang=detected,
+            )
+            try:
+                raw_srt.unlink(missing_ok=True)
+            except OSError:
+                pass
             return {
                 "success": True,
                 "action": "transcribed_and_translated",
@@ -1145,11 +1170,32 @@ async def _asr_transcribe(file_path: Path, drift_threshold_ms: int) -> dict:
                 "[LIBRARY] ASR translation failed for %s, keeping raw transcript: %s",
                 sanitize_log(file_path.name), e,
             )
+            # Keep the raw transcript, labelled with its detected language so it
+            # is never mistaken for English on a later scan.
+            try:
+                final_srt = file_path.with_suffix(f".{detected or 'raw'}.srt")
+                raw_srt.replace(final_srt)
+            except OSError:
+                final_srt = raw_srt
+            return {
+                "success": True,
+                "action": "transcribed",
+                "output_path": str(final_srt),
+                "provider": "asr",
+                "model_used": model_used,
+                "cost": 0.0,
+                "drift_ms": None,
+            }
 
+    # English transcript → move into place as the English subtitle.
+    try:
+        raw_srt.replace(final_srt)
+    except OSError:
+        final_srt = raw_srt
     return {
         "success": True,
         "action": "transcribed",
-        "output_path": str(out_srt),
+        "output_path": str(final_srt),
         "provider": "asr",
         "model_used": model_used,
         "cost": 0.0,
