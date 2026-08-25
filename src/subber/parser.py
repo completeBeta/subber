@@ -154,14 +154,17 @@ def lang_from_content(path: Path, max_lines: int = 25) -> str | None:
 
 
 def detect_subtitle_language(path: Path) -> str:
-    """Detect a subtitle's language: filename marker first, then a content
-    sample of a few dialogue lines. Returns an ISO 639-1 code, or 'unknown'
-    when neither source is conclusive.
+    """Detect a subtitle's language: content sample first (the actual text is
+    the ground truth), then the filename marker as a fallback. Returns an ISO
+    639-1 code, or 'unknown' when neither source is conclusive.
 
-    Never trusts a bare trailing token — SubDL and friends ship names like
-    '…English.EN.zip.ass', where 'zip' is packaging, not a language.
+    Content-first because filename markers lie for anime releases: names like
+    'Show.S01E01.JAP.720p.srt' carry the AUDIO language ('JAP' -> Japanese)
+    while the subtitle text is English. Also never trusts a bare trailing token
+    — SubDL ships names like '…English.EN.zip.ass' where 'zip' is packaging,
+    not a language.
     """
-    lang = lang_from_filename(path.name)
+    lang = lang_from_content(path)
     if lang:
         return lang
-    return lang_from_content(path) or "unknown"
+    return lang_from_filename(path.name) or "unknown"

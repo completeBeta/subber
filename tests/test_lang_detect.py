@@ -108,6 +108,19 @@ def test_detect_subtitle_language_empty_file_is_unknown(tmp_path):
     assert detect_subtitle_language(p) == "unknown"
 
 
+def test_detect_subtitle_language_jap_filename_english_content(tmp_path):
+    # Anime release: filename carries the AUDIO language (JAP), but the sub
+    # text is English. Content must win over the misleading filename marker.
+    p = _write(tmp_path, "Show.S01E01.JAP.720p.srt", EN_SRT)
+    assert detect_subtitle_language(p) == "en"
+
+
+def test_detect_subtitle_language_jap_filename_japanese_content(tmp_path):
+    # Same filename, but genuinely Japanese text — still detected via content.
+    p = _write(tmp_path, "Show.S01E01.JAP.720p.srt", JA_SRT)
+    assert detect_subtitle_language(p) == "ja"
+
+
 # ── LLM language confirmation (response parsing, no network) ──
 
 def test_identify_language_parses_clean_code(monkeypatch):
