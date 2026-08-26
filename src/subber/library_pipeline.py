@@ -1455,11 +1455,16 @@ async def _search_download_and_process(
     except Exception as e:
         logger.warning("Ad removal failed for %s: %s", sanitize_log(downloaded_path.name), e)
 
-    # Decide whether the downloaded sub needs translation. Confirm the language
-    # rather than assuming it: filename marker first, then langdetect, then the
-    # LLM. Translate only when a non-English language is positively identified.
+    # Decide whether the downloaded sub needs translation. Content-first
+    # detection (langdetect on the actual text) is the ground truth; the LLM
+    # confirmation is only consulted when the result is inconclusive OR the
+    # filename signals the sub could be in multiple languages (dual-audio /
+    # multi-audio releases), where a single langdetect verdict on mixed
+    # romaji+English content is unreliable.
+    from .parser import filename_signals_multiple_langs
+
     sub_lang = _detect_sub_language(downloaded_path)
-    if sub_lang == "unknown":
+    if sub_lang == "unknown" or filename_signals_multiple_langs(downloaded_path.name):
         sub_lang = await _confirm_language(downloaded_path)
     if sub_lang == "unknown":
         logger.warning(

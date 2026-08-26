@@ -5,7 +5,11 @@ like "…English.EN.zip.ass", and the old detector read the last token ("zip")
 as a language code, translating thousands of English subs pointlessly.
 """
 
-from subber.parser import detect_subtitle_language, lang_from_filename
+from subber.parser import (
+    detect_subtitle_language,
+    filename_signals_multiple_langs,
+    lang_from_filename,
+)
 from subber.translator import Translator
 
 
@@ -140,3 +144,32 @@ def test_identify_language_empty_response_is_unknown(monkeypatch):
     t = Translator(api_base="http://fake", api_key="x", model="test")
     monkeypatch.setattr(t, "_call_api", lambda messages: "")
     assert t.identify_language("...") == "unknown"
+
+
+# ── multi-language filename signals (trigger LLM confirmation) ──
+
+def test_multilang_dual_audio():
+    assert filename_signals_multiple_langs("Show.S01E01.Dual.Audio.720p.srt")
+    assert filename_signals_multiple_langs("Show.S01E01.Dual-Audio.srt")
+    assert filename_signals_multiple_langs("Show.S01E01.DualAudio.srt")
+
+
+def test_multilang_multi_tag():
+    assert filename_signals_multiple_langs("[Aoi] Show - 04 MULTI [BD 1080p].srt")
+    assert filename_signals_multiple_langs("Show.S01E01.Multi-Audio.srt")
+
+
+def test_multilang_two_language_tokens():
+    assert filename_signals_multiple_langs("Show.S01E01.JAP+ENG.srt")
+    assert filename_signals_multiple_langs("Show.japanese.and.english.srt")
+
+
+def test_multilang_single_language_is_not_multilang():
+    # A single audio-language token (the original bug) is NOT multi-language.
+    assert not filename_signals_multiple_langs("Show.S01E01.JAP.720p.srt")
+    assert not filename_signals_multiple_langs("Show.S01E01.english.srt")
+
+
+def test_multilang_plain_name_is_not_multilang():
+    assert not filename_signals_multiple_langs("Show.S01E01.1080p.BluRay.srt")
+    assert not filename_signals_multiple_langs("Show.S01E01.WEB-DL.CR.srt")

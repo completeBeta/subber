@@ -168,3 +168,24 @@ def detect_subtitle_language(path: Path) -> str:
     if lang:
         return lang
     return lang_from_filename(path.name) or "unknown"
+
+
+def filename_signals_multiple_langs(name: str) -> bool:
+    """True when a filename signals the subtitle could be in MULTIPLE languages.
+
+    Anime releases tag these as 'Dual Audio', 'Multi', 'Multi-Audio', etc., or
+    carry two or more distinct language tokens (e.g. 'JAP' + 'ENG'). For these,
+    a single langdetect verdict on the subtitle text is unreliable — the sub is
+    often dual-language (romaji + English song lyrics) or the 'language' token
+    refers to the audio track, not the sub. The caller should confirm via the
+    LLM rather than trusting langdetect alone.
+    """
+    tokens = re.split(r"[^a-zA-Z0-9]+", name.lower())
+    # Explicit dual/multi-audio release tags
+    if "dual" in tokens and "audio" in tokens:
+        return True
+    if any(m in tokens for m in ("dualaudio", "multi", "multiaudio", "multilingual", "bilingual")):
+        return True
+    # Two or more distinct language markers in the name
+    langs = {LANG_TOKEN_TO_CODE[t] for t in tokens if t in LANG_TOKEN_TO_CODE}
+    return len(langs) >= 2
