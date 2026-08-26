@@ -358,16 +358,18 @@ def get_all_pending() -> list[dict]:
 
 
 def mark_stale_in_progress(minutes: int | None = None) -> int:
-    """Reset 'in_progress' files back to 'pending'.
+    """Recover 'in_progress' files left behind by a dead/hung task.
 
     Args:
-        minutes: if set, only reset rows whose updated_at is OLDER than this
-            many minutes (a watchdog/heartbeat use — a file legitimately
-            processing gets updated frequently, so old rows are corpses from
-            crashes, hangs, or killed containers). If None, resets ALL
-            in_progress rows (crash-recovery on resume).
+        minutes: if set, mark rows whose updated_at is OLDER than this many
+            minutes as 'failed' (the watchdog case — a file that legitimately
+            processing would be updating frequently, so a row this stale is a
+            hang, and retrying it would just burn time/cost again). If None,
+            reset ALL in_progress rows back to 'pending' (crash-recovery on
+            resume — the container died, so the files were never actually
+            finished and SHOULD be retried).
 
-    Returns count of reset files.
+    Returns count of affected files.
     """
     with _lock:
         conn = _connect()
@@ -381,7 +383,9 @@ def mark_stale_in_progress(minutes: int | None = None) -> int:
             else:
                 cursor = conn.execute(
                     """UPDATE library_files
-                       SET status = 'pending', updated_at = datetime('now')
+                       SET status = 'failed',
+                           error_message = 'Hung >30 min during processing (watchdog)',
+                           updated_at = datetime('now')
                        WHERE status = 'in_progress'
                          AND updated_at < datetime('now', ?)""",
                     (f"-{minutes} minutes",),

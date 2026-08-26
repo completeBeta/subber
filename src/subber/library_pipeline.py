@@ -529,16 +529,28 @@ async def _process_file(record: dict, scan_id: int, drift_threshold_ms: int) -> 
                 # Provider search failed — translate existing foreign sub
                 foreign_sub = _find_external_foreign(file_path)
                 if foreign_sub:
-                    result = await _translate_and_sync(file_path, foreign_sub, drift_threshold_ms)
-                    cost = result["cost"]
-                    library_db.update_file_status(
-                        file_id, status="done", action_taken="translated",
-                        subtitle_path=result["output_path"],
-                        model_used=result["model_used"],
-                        sync_drift_ms=result.get("drift_ms"),
-                        translation_cost=cost,
-                        subtitle_languages=["en"],
-                    )
+                    to_translate = _filter_to_dialogue(foreign_sub)
+                    if to_translate is None:
+                        library_db.update_file_status(
+                            file_id, status="failed",
+                            error_message="Foreign subtitle has no spoken dialogue",
+                        )
+                    else:
+                        result = await _translate_and_sync(file_path, to_translate, drift_threshold_ms)
+                        if to_translate != foreign_sub:
+                            try:
+                                to_translate.unlink(missing_ok=True)
+                            except OSError:
+                                pass
+                        cost = result["cost"]
+                        library_db.update_file_status(
+                            file_id, status="done", action_taken="translated",
+                            subtitle_path=result["output_path"],
+                            model_used=result["model_used"],
+                            sync_drift_ms=result.get("drift_ms"),
+                            translation_cost=cost,
+                            subtitle_languages=["en"],
+                        )
                 else:
                     library_db.update_file_status(
                         file_id, status="failed", error_message="No foreign subtitle found to translate"
@@ -567,18 +579,30 @@ async def _process_file(record: dict, scan_id: int, drift_threshold_ms: int) -> 
                 extract_result = await _extract_embedded_sub(file_path, foreign_lang)
                 if extract_result:
                     sub_path = extract_result[0]
-                    result = await _translate_and_sync(file_path, sub_path, drift_threshold_ms)
-                    cost = result["cost"]
-                    print(f"[LIBRARY] Translation done: file_id={file_id} cost={cost} model={result.get('model_used')}", flush=True)
-                    library_db.update_file_status(
-                        file_id, status="done", action_taken="translated",
-                        subtitle_path=result["output_path"],
-                        model_used=result["model_used"],
-                        provider_used="embedded",
-                        sync_drift_ms=result.get("drift_ms"),
-                        translation_cost=cost,
-                        subtitle_languages=["en"],
-                    )
+                    to_translate = _filter_to_dialogue(sub_path)
+                    if to_translate is None:
+                        library_db.update_file_status(
+                            file_id, status="failed",
+                            error_message="Embedded foreign subtitle has no spoken dialogue",
+                        )
+                    else:
+                        result = await _translate_and_sync(file_path, to_translate, drift_threshold_ms)
+                        if to_translate != sub_path:
+                            try:
+                                to_translate.unlink(missing_ok=True)
+                            except OSError:
+                                pass
+                        cost = result["cost"]
+                        print(f"[LIBRARY] Translation done: file_id={file_id} cost={cost} model={result.get('model_used')}", flush=True)
+                        library_db.update_file_status(
+                            file_id, status="done", action_taken="translated",
+                            subtitle_path=result["output_path"],
+                            model_used=result["model_used"],
+                            provider_used="embedded",
+                            sync_drift_ms=result.get("drift_ms"),
+                            translation_cost=cost,
+                            subtitle_languages=["en"],
+                        )
                 else:
                     library_db.update_file_status(
                         file_id, status="failed", error_message="Failed to extract embedded subtitle"
@@ -1061,6 +1085,78 @@ def _has_usable_dialogue(sub_path: Path) -> bool:
     if dialogue_events == 0 and non_dialogue_events > 0:
         return False
     return True
+
+
+def _filter_to_dialogue(sub_path: Path) -> Path | None:
+    """Write a copy of an .ass/.ssa sub containing only spoken-dialogue events.
+
+    Fansub tracks can mix dialogue with thousands of sign/karaoke/effect events
+    (on-screen text, OP/ED lyrics, spell effects). Translating all of them is
+    slow and costly — a 2,978-line track can run 30+ minutes and still not
+    finish. Translating only the dialogue lines is what the user actually wants.
+
+    Returns:
+    - a filtered `.dialogue` file path when the ASS contains dialogue events
+      (translate this instead of the full fansub),
+    - `sub_path` itself when there's nothing to filter (.srt/.vtt has no style
+      info, or the file is unreadable) — translate the original as-is,
+    - None when the file is ASS/SSA but contains ZERO dialogue events — the
+      caller should skip translation (a signs-only track isn't worth it).
+    """
+    suffix = sub_path.suffix.lower()
+    if suffix not in (".ass", ".ssa"):
+        return sub_path  # .srt/.vtt carry no style info — nothing to filter
+    try:
+        lines = sub_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return sub_path  # unreadable — translate the original as-is
+
+    # Mirrors the style classification in _has_usable_dialogue above.
+    dialogue_styles = {
+        "main", "italics", "ital", "top", "default", "dialogue", "dial",
+        "sub", "subtitle", "subtitles", "normal", "text", "speech", "talk",
+        "caption", "dialogue2", "default2",
+    }
+    non_dialogue_markers = (
+        "sign", "song", "romaji", "karaoke", "title", "effect", "menu",
+        "game", "logo", "credit", "magic", "insert", "lyric", "banner",
+        "opening", "ending",
+    )
+
+    def _is_dialogue(style: str) -> bool:
+        s = style.lower().strip()
+        if s in dialogue_styles:
+            return True
+        for m in non_dialogue_markers:
+            if m in s:
+                return False
+        for token in s.replace("_", " ").replace("-", " ").split():
+            if token in ("op", "ed"):
+                return False
+        return True
+
+    kept = 0
+    out: list[str] = []
+    for line in lines:
+        if line.startswith("Dialogue:"):
+            parts = line.split(",", 9)
+            if len(parts) < 4:
+                out.append(line)  # malformed → keep rather than silently drop
+                continue
+            style = parts[3].strip()
+            if style and _is_dialogue(style):
+                out.append(line)
+                kept += 1
+            # else: drop sign/song/effect events
+        else:
+            out.append(line)  # keep [Script Info], [Styles], comments, etc.
+
+    if kept == 0:
+        return None  # no dialogue at all — caller should skip translation
+
+    filtered = sub_path.with_name(sub_path.stem + ".dialogue" + sub_path.suffix)
+    filtered.write_text("\n".join(out) + "\n", encoding="utf-8")
+    return filtered
 
 
 def _detect_sub_language(sub_path: Path) -> str:

@@ -3263,7 +3263,7 @@ async def _stale_in_progress_watchdog() -> None:
                     )
             reset = library_db.mark_stale_in_progress(minutes=30)
             if reset:
-                _log.warning("Stale-progress watchdog: reset %d hung in_progress file(s)", reset)
+                _log.warning("Stale-progress watchdog: marked %d hung in_progress file(s) failed", reset)
         except Exception as e:
             _log.warning("Stale-progress watchdog error: %s", e)
 
