@@ -1044,7 +1044,7 @@ def _has_usable_dialogue(sub_path: Path) -> bool:
     non_dialogue_markers = (
         "sign", "song", "romaji", "karaoke", "title", "effect", "menu",
         "game", "logo", "credit", "magic", "insert", "lyric", "banner",
-        "opening", "ending",
+        "opening", "ending", "edl", "edr",
     )
 
     def _style_is_dialogue(style: str) -> bool:
@@ -1120,7 +1120,7 @@ def _filter_to_dialogue(sub_path: Path) -> Path | None:
     non_dialogue_markers = (
         "sign", "song", "romaji", "karaoke", "title", "effect", "menu",
         "game", "logo", "credit", "magic", "insert", "lyric", "banner",
-        "opening", "ending",
+        "opening", "ending", "edl", "edr",
     )
 
     def _is_dialogue(style: str) -> bool:

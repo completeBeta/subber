@@ -46,6 +46,23 @@ def test_keeps_dialogue_drops_signs(tmp_path):
     assert "LA LA LA" not in content
 
 
+def test_drops_ending_karaoke(tmp_path):
+    # French fansub ending-song karaoke styles (EDL/EDR) must be dropped too.
+    ass = _write(tmp_path / "Show.fr.ass", ASS_HEADER + (
+        "Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,Du dialogue\n"
+        "Dialogue: 0,0:00:02.00,0:00:03.00,EDL In,,0,0,0,,ENDING LYRICS LEFT\n"
+        "Dialogue: 0,0:00:03.00,0:00:04.00,EDR In,,0,0,0,,ENDING LYRICS RIGHT\n"
+        "Dialogue: 0,0:00:04.00,0:00:05.00,Default,,0,0,0,,Plus de dialogue\n"
+    ))
+    filtered = _filter_to_dialogue(ass)
+    assert filtered is not None
+    content = filtered.read_text(encoding="utf-8")
+    assert "Du dialogue" in content
+    assert "Plus de dialogue" in content
+    assert "ENDING LYRICS LEFT" not in content
+    assert "ENDING LYRICS RIGHT" not in content
+
+
 def test_signs_only_returns_none(tmp_path):
     ass = _write(tmp_path / "Show.fr.ass", ASS_HEADER + (
         "Dialogue: 0,0:00:01.00,0:00:02.00,Sign,,0,0,0,,TEXT ONE\n"
