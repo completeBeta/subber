@@ -72,20 +72,6 @@
         </div>
     </div>
 
-    <!-- Translation Backend -->
-    <div class="settings-section">
-        <h3>Translation Settings</h3>
-        <div class="form-group">
-            <label>Temperature (0–2)</label>
-            <input type="number" id="cfg-temperature" step="0.1" min="0" max="2" placeholder="0.1">
-        </div>
-        <div class="form-group">
-            <label>Chunk size (lines per translation request)</label>
-            <input type="number" id="cfg-chunk-size" min="10" max="200" placeholder="50">
-        </div>
-    </div>
-
-
     <!-- Translation Backends (Advanced) -->
     <div class="settings-section">
         <h3>Translation Providers</h3>
@@ -310,27 +296,6 @@
         <!-- Library paths auto-derived from Mounts configuration -->
 
         <div class="form-group">
-            <label>Sync Drift Threshold (ms)</label>
-            <input type="number" id="cfg-drift-threshold" min="0" max="5000" placeholder="200">
-            <div class="hint">Only re-sync subtitles if drift exceeds this value.</div>
-        </div>
-        <div class="form-group">
-            <label>Max Concurrent Operations</label>
-            <input type="number" id="cfg-max-concurrent" min="1" max="10" placeholder="2">
-        </div>
-        <div class="form-group">
-            <label>Auto-scan Interval</label>
-            <select id="cfg-scan-interval">
-                <option value="0">Manual</option>
-                <option value="6">Every 6 hours</option>
-                <option value="12">Every 12 hours</option>
-                <option value="24">Every 24 hours</option>
-                <option value="168">Every week</option>
-                <option value="336">Every fortnight</option>
-                <option value="720">Every month</option>
-            </select>
-        </div>
-        <div class="form-group">
             <label>Ad / Credit Removal</label>
             <select id="cfg-ad-removal-mode">
                 <option value="off">Off</option>
@@ -351,6 +316,79 @@
             <div class="hint">When a scan finds no embedded subtitle and no provider match, transcribe the audio via ASR (requires ASR enabled below).</div>
         </div>
     </div>
+
+    <!-- Advanced -->
+    <details class="settings-section" style="margin-top: 1rem;">
+        <summary style="cursor: pointer; list-style: none; display: flex; align-items: center; gap: 0.5rem;">
+            <h3 style="margin: 0;">⚙️ Advanced</h3>
+            <span class="hint" style="font-size: 0.8rem; color: var(--text-muted);">tuning knobs with safe defaults — change carefully</span>
+        </summary>
+
+        <div style="padding-top: 0.8rem; border-top: 1px solid var(--border); margin-top: 0.8rem;">
+
+            <!-- Watchdog -->
+            <div class="form-group">
+                <label>Watchdog timeout (minutes)</label>
+                <input type="number" id="cfg-watchdog-timeout" min="5" max="180" placeholder="30">
+                <div class="hint">Mark a file failed if it's been stuck processing this long. Too high = a hang burns credits longer before it's caught; too low = kills legit slow jobs.</div>
+            </div>
+
+            <!-- Translation tuning -->
+            <h4 style="margin-bottom: 0.5rem;">Translation tuning</h4>
+            <div class="form-group">
+                <label>Temperature (0–2)</label>
+                <input type="number" id="cfg-temperature" step="0.1" min="0" max="2" placeholder="0.1">
+            </div>
+            <div class="form-group">
+                <label>Chunk size (lines per translation request)</label>
+                <input type="number" id="cfg-chunk-size" min="10" max="200" placeholder="50">
+            </div>
+            <div class="form-group">
+                <label>Max retries per API call</label>
+                <input type="number" id="cfg-max-retries" min="0" max="10" placeholder="3">
+            </div>
+
+            <!-- Scan tuning -->
+            <h4 style="margin-bottom: 0.5rem;">Scan tuning</h4>
+            <div class="form-group">
+                <label>Sync drift threshold (ms)</label>
+                <input type="number" id="cfg-drift-threshold" min="0" max="5000" placeholder="200">
+                <div class="hint">Only re-sync subtitles if drift exceeds this value.</div>
+            </div>
+            <div class="form-group">
+                <label>Max concurrent operations</label>
+                <input type="number" id="cfg-max-concurrent" min="1" max="10" placeholder="2">
+            </div>
+            <div class="form-group">
+                <label>Auto-scan interval</label>
+                <select id="cfg-scan-interval">
+                    <option value="0">Manual</option>
+                    <option value="6">Every 6 hours</option>
+                    <option value="12">Every 12 hours</option>
+                    <option value="24">Every 24 hours</option>
+                    <option value="168">Every week</option>
+                    <option value="336">Every fortnight</option>
+                    <option value="720">Every month</option>
+                </select>
+            </div>
+
+            <!-- Show identification -->
+            <h4 style="margin-bottom: 0.5rem;">Show identification</h4>
+            <div class="form-group">
+                <label class="checkbox-label" style="display: flex; align-items: center; gap: 0.3rem; cursor: pointer;">
+                    <input type="checkbox" id="cfg-use-identification" checked> Enable show identification
+                </label>
+            </div>
+            <div class="form-group">
+                <label>Preferred source</label>
+                <select id="cfg-identify-prefer">
+                    <option value="anilist">AniList (anime)</option>
+                    <option value="tmdb">TMDB (movies/TV)</option>
+                </select>
+            </div>
+
+        </div>
+    </details>
 
     <!-- Audio Transcription (ASR) -->
     <div class="settings-section">
@@ -417,18 +455,6 @@
             Improves subtitle provider match rates by searching with canonical titles and IDs.
         </p>
         <div class="form-group">
-            <label class="checkbox-label" style="display: flex; align-items: center; gap: 0.3rem; cursor: pointer;">
-                <input type="checkbox" id="cfg-use-identification" checked> Enable show identification
-            </label>
-        </div>
-        <div class="form-group">
-            <label>Preferred Source</label>
-            <select id="cfg-identify-prefer">
-                <option value="anilist">AniList (anime)</option>
-                <option value="tmdb">TMDB (movies/TV)</option>
-            </select>
-        </div>
-        <div class="form-group">
             <label>TMDB API Key (optional)</label>
             <input type="text" id="cfg-tmdb-api-key" placeholder="TMDB v3 API key" style="width:100%;">
             <div class="hint">Used as fallback when AniList doesn't find a match.</div>
@@ -479,8 +505,9 @@ async function loadSettings() {
     var ph = cfg.cost?.peak_hours_utc || [[1,4],[6,10]];
     renderPeakRanges(ph);
     document.getElementById('cfg-temperature').value = cfg.translation?.temperature ?? 0.1;
-        document.getElementById('cfg-chunk-size').value = cfg.translation?.chunk_size ?? 50;
-        document.getElementById('cfg-source-lang').value = cfg.translation?.source_lang || 'auto';
+    document.getElementById('cfg-chunk-size').value = cfg.translation?.chunk_size ?? 50;
+    document.getElementById('cfg-max-retries').value = cfg.translation?.max_retries ?? 3;
+    document.getElementById('cfg-source-lang').value = cfg.translation?.source_lang || 'auto';
         document.getElementById('cfg-target-lang').value = cfg.translation?.target_lang || 'en';
         document.getElementById('cfg-sync-engine').value = cfg.sync?.engine || 'ffsubsync';
         document.getElementById('cfg-default-offset').value = cfg.sync?.default_offset ?? 0.0;
@@ -518,6 +545,7 @@ async function loadSettings() {
             document.getElementById('cfg-drift-threshold').value = cfg.library.drift_threshold_ms || 200;
             document.getElementById('cfg-max-concurrent').value = cfg.library.max_concurrent || 2;
             document.getElementById('cfg-scan-interval').value = cfg.library.scan_interval_hours || 0;
+            document.getElementById('cfg-watchdog-timeout').value = cfg.library.watchdog_timeout_min || 30;
             document.getElementById('cfg-ad-removal-mode').value = (cfg.ad_removal && cfg.ad_removal.mode) || 'off';
             document.getElementById('cfg-dry-run-default').checked = cfg.library.dry_run_default !== false;
             document.getElementById('cfg-asr-fallback').checked = cfg.library.asr_fallback === true;
@@ -666,6 +694,8 @@ function validateSettings() {
         'cfg-drift-threshold': [0, 60000, 'Sync drift threshold (ms)'],
         'cfg-max-concurrent': [1, 32, 'Max concurrent files'],
         'cfg-scan-interval': [0, 8760, 'Auto-scan interval (hours)'],
+        'cfg-watchdog-timeout': [5, 180, 'Watchdog timeout (minutes)'],
+        'cfg-max-retries': [0, 10, 'Max retries per API call'],
         'cfg-max-upload-mb': [1, 1048576, 'Max upload size (MB)'],
         'cfg-min-free-disk-mb': [0, 104857600, 'Min free disk (MB)'],
         'cfg-cost-input': [0, 10000, 'Input cost per million'],
@@ -760,10 +790,9 @@ async function saveSettings() {
             values: {
                 temperature: parseFloat(document.getElementById('cfg-temperature').value) || 0.1,
                 chunk_size: parseInt(document.getElementById('cfg-chunk-size').value) || 50,
+                max_retries: parseInt(document.getElementById('cfg-max-retries').value) || 3,
                 source_lang: document.getElementById('cfg-source-lang').value,
                 target_lang: document.getElementById('cfg-target-lang').value,
-                timeout: 120,
-                max_retries: 1,
                 backends: currentBackends,
             }
         },
@@ -792,6 +821,7 @@ async function saveSettings() {
                 drift_threshold_ms: parseInt(document.getElementById('cfg-drift-threshold').value) || 200,
                 max_concurrent: parseInt(document.getElementById('cfg-max-concurrent').value) || 8,
                 scan_interval_hours: parseInt(document.getElementById('cfg-scan-interval').value) || 0,
+                watchdog_timeout_min: parseInt(document.getElementById('cfg-watchdog-timeout').value) || 30,
                 dry_run_default: document.getElementById('cfg-dry-run-default').checked,
                 asr_fallback: document.getElementById('cfg-asr-fallback').checked,
                 use_identification: document.getElementById('cfg-use-identification').checked,

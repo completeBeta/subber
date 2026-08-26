@@ -3238,22 +3238,25 @@ async def _log_shutdown() -> None:
 
 
 async def _stale_in_progress_watchdog() -> None:
-    """Periodically reset files stuck 'in_progress' for too long.
+    """Periodically mark files stuck 'in_progress' too long as failed.
 
     A file legitimately being processed gets its updated_at refreshed as it
-    moves through stages. If a row stays 'in_progress' with no update for 30+
-    minutes, the owning task is dead (OOM kill, container restart, ffmpeg
-    hang) — reset it to 'pending' so it doesn't read as frozen forever and
-    gets retried on the next resume.
+    moves through stages. If a row stays 'in_progress' with no update for
+    `library.watchdog_timeout_min` (default 30) minutes, the owning task is
+    dead (OOM kill, container restart, ffmpeg hang) — mark it failed so it
+    doesn't read as frozen forever and doesn't re-queue to burn credits again.
     """
     while True:
         await asyncio.sleep(60)
         try:
             from . import library_db
+            timeout_min = int(
+                config.library_settings().get("watchdog_timeout_min", 30) or 30
+            )
             # Log WHICH files are hung (and for how long) before resetting —
             # previously only a count was logged, which gave no clue about
             # what file/provider caused the stall.
-            stale = library_db.get_stale_in_progress(minutes=30)
+            stale = library_db.get_stale_in_progress(minutes=timeout_min)
             if stale:
                 for s in stale:
                     _log.warning(
@@ -3261,7 +3264,7 @@ async def _stale_in_progress_watchdog() -> None:
                         s.get("id"), s.get("minutes_stale"),
                         sanitize_log(s.get("file_path", "?")),
                     )
-            reset = library_db.mark_stale_in_progress(minutes=30)
+            reset = library_db.mark_stale_in_progress(minutes=timeout_min)
             if reset:
                 _log.warning("Stale-progress watchdog: marked %d hung in_progress file(s) failed", reset)
         except Exception as e:

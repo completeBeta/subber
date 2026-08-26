@@ -72,6 +72,7 @@ DEFAULTS = {
         "scan_interval_hours": 6,
         "dry_run_default": True,
         "asr_fallback": False,       # transcribe audio via ASR when no subtitle exists
+        "watchdog_timeout_min": 30,  # mark a file failed if stuck in_progress this long
         "providers": {
             "enabled": ["embedded", "subdl", "gestdown"],
         },
