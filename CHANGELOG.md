@@ -2,6 +2,13 @@
 
 All notable changes to Subber are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/), and this project versions with [SemVer](https://semver.org/).
 
+## [0.8.0] - 2026-08-27
+
+### Added
+- **Character-name seeding** — the translator now fetches the show's canonical character names from AniList (native Japanese → romaji) and injects them into the translation prompt, so names in Whisper transcripts are romanized consistently (e.g. 瓜野 → "Urino" instead of "Umino"/"Urio"/"Uri-no"; 五日市 no longer becomes "5th of the month"). Applies to the library scan (external, embedded, and ASR translation paths) and the grab tab.
+
+[0.8.0]: https://github.com/completeBeta/Subber/releases/tag/v0.8.0
+
 ## [0.7.1] - 2026-08-27
 
 ### Fixed
