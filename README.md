@@ -2,7 +2,7 @@
 
 **Subtitle grabber, sync, and translator — Docker + Web UI.**
 
-Upload a video, Subber finds subtitles across 5 providers, syncs them with ffsubsync, and translates non-English subs using **OpenRouter Llama 3.1 8B** (recommended — fast, cheap, accurate) with DeepSeek or Ollama as fallbacks. Or scan your entire media library and Subber handles everything automatically.
+Upload a video, Subber finds subtitles across 5 providers, syncs them with ffsubsync, and translates non-English subs using **OpenRouter Llama 3.1 8B** (recommended — fast, cheap, accurate) with DeepSeek or Ollama as fallbacks. If no subtitle exists at all, it can transcribe the audio track itself via a self-hosted Whisper server. Or scan your entire media library and Subber handles everything automatically.
 
 ## 📸 Screenshots
 
@@ -21,9 +21,10 @@ A library scan follows a deterministic pipeline designed to be **safe to run rep
 3. **Checks for existing subtitles** — if a non-empty `.en.srt`/`.en.ass` already sits next to the video, it's skipped immediately (no re-download, no re-sync)
 4. **Extracts embedded subtitles** — ffmpeg pulls subtitle tracks from video files (configurable timeout, partial output cleaned on failure)
 5. **Searches external providers** — SubDL → Gestdown → Podnapisi, with OpenSubtitles as a rate-limited fallback; episode-matching guard prevents wrong-episode downloads; zip/gzip packs are unpacked and matched
-6. **Syncs with ffsubsync** — audio-alignment with drift threshold; skips re-sync if drift is below threshold
-7. **Translates if needed** — non-English subs go through the LLM backend chain (OpenRouter → DeepSeek → Ollama) with automatic fallback
-8. **Marks complete** — writes result to SQLite; scan progress, costs, and timing are all persisted
+6. **Transcribes via ASR (fallback)** — if nothing is found anywhere and ASR is enabled, Subber transcribes the audio track itself via a self-hosted Whisper server
+7. **Syncs with ffsubsync** — audio-alignment with drift threshold; skips re-sync if drift is below threshold
+8. **Translates if needed** — language is detected from the subtitle's actual text (not its filename); non-English subs go through the LLM backend chain (OpenRouter → DeepSeek → Ollama) with automatic fallback, and foreign fansubs are first stripped of sign/song/karaoke lines so only dialogue is translated
+9. **Marks complete** — writes result to SQLite; scan progress, costs, and timing are all persisted
 
 **Crash recovery:** if the container dies mid-scan, Resume picks up exactly where it left off — done files are skipped, in-progress files are re-processed. An automatic DB backup runs before every scan (newest 5 kept, oldest cycled out).
 
@@ -167,19 +168,19 @@ Real-time log viewer with filtering and export.
 ### ⚙️ Settings
 Full configuration UI. **Save Settings** persists everything (with validation that blocks saving a broken config).
 
-- **Translation Settings** — target language, temperature, chunking, timeouts
+- **Cost Estimation** — per-token pricing with peak-hour multipliers (**+ Add Range**)
 - **Translation Providers** — add/remove LLM backends with priority ordering (**+ Add Backend**)
 - **Default Languages** — preferred subtitle language order and acceptable track types
 - **Subtitle Sync** — sync engine and drift threshold
 - **Subtitle Providers** — enable/disable providers and enter credentials (SubDL key, OpenSubtitles, Gestdown)
-- **Cost Estimation** — per-token pricing with peak-hour multipliers (**+ Add Range**)
-- **Show Identification** — AniList/TMDB settings and preferred source
-- **Library Settings** — scan paths, concurrency, auto-scan interval
-- **Ad / Credit Removal** — strip advert, donation-request, and fansub-credit lines from the intro/outro of downloaded subtitles (off by default)
+- **Library Settings** — scan paths, concurrency, auto-scan interval, the **Transcribe audio when no subtitle found** fallback toggle, and **Ad / Credit Removal** mode
+- **🎙️ Audio Transcription (ASR)** — self-hosted Whisper server URL, model, language, and mode
+- **📺 Show Identification** — TMDB API key (AniList needs no key)
 - **Library Mounts (SMB/CIFS)** — add mounts (**+ Add Mount**), **Test** a share, **Remove** it
 - **💾 Database Backups** — **Backup Now**, **Refresh** the list, **Restore**, or delete a backup
 - **⚠ Caution Zone** — upload size and minimum-free-disk limits
 - **🔒 Security** — optional API key to protect write operations
+- **⚙️ Advanced** (collapsed) — watchdog timeout, translation tuning (temperature, chunk size, retries), scan tuning (drift threshold, concurrency, interval), and show-identification preferences
 
 ## 🌍 Subtitle Providers
 
@@ -301,8 +302,16 @@ src/subber/
 ├── config.py           # YAML config with deep merge
 ├── identify.py         # AniList + TMDB show identification
 ├── translator.py       # Multi-backend LLM translator
+├── transcriber.py      # ASR: audio → subtitle via Whisper server
+├── parser.py           # Subtitle parsing + content-first language detection
 ├── syncer.py           # ffsubsync wrapper (0.5.0 compat)
+├── ad_removal.py       # Strip ad/credit lines from downloaded subs
+├── downloader.py       # Subtitle download handling
 ├── safewrite.py        # Safe subtitle file writes
+├── logsanitize.py      # Secret redaction for logs/diagnostics
+├── rate_limit.py       # Provider rate limiting
+├── types.py            # Shared data types
+├── cli.py              # CLI entrypoint
 ├── providers/          # Subtitle provider implementations
 │   ├── subdl.py        # SubDL REST API
 │   ├── gestdown.py     # Gestdown REST API (Addic7ed proxy)
@@ -323,6 +332,7 @@ templates/
 ├── logs.html           # Log viewer (+ API stats)
 ├── settings.html       # Settings tab (+ security)
 ├── search.html         # Search tab
+├── sync.html           # Sync video + subtitle
 └── base.html           # Shared layout + nav
 
 static/
@@ -378,7 +388,6 @@ Key sections: `translation.backends`, `providers`, `library`, `sync`, `cost`, `l
 
 ## 💡 Feature Requests
 
-- **Audio extraction / ASR** — generate subtitles from the audio track when no subtitles are available.
 - **Full mobile responsiveness** — make the whole UI (nav, tables, forms, banners) usable on phone-sized screens.
 
 ## 🐛 Reporting Issues
@@ -391,7 +400,7 @@ Include these six things to make it quick to diagnose:
 2. **What you did** — which tab, what file, what you clicked.
 3. **What you expected vs. what actually happened.**
 4. **The exact error message** — paste the text, or attach a screenshot (blur anything private first).
-5. **Your version** — shown in the footer of every page (e.g. `v0.6.0`).
+5. **Your version** — shown in the footer of every page (e.g. `v0.7.0`).
 6. **When it started** — right after an update, or has it always done this?
 
 > ⚠️ **Privacy:** the Diagnostics bundle is redacted (API keys, passwords, and IPs are masked), so it's safe to attach publicly. The raw logs under **Logs → Export Full History** are *not* redacted — don't post those publicly.

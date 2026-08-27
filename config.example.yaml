@@ -9,7 +9,7 @@ translation:
   temperature: 0.1
   max_tokens: 4096
   chunk_size: 50
-  max_retries: 1
+  max_retries: 3
   timeout: 120
   backends:
     # Provider-agnostic: `name` is a free-form label; the actual model is

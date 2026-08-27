@@ -2,6 +2,33 @@
 
 All notable changes to Subber are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/), and this project versions with [SemVer](https://semver.org/).
 
+## [0.7.0] - 2026-08-27
+
+### Added
+- **Audio Transcription (ASR)** — self-hosted Whisper fallback: when a video has no embedded subtitle and no provider match, transcribe the audio track to a subtitle. Available as a grab-tab "Transcribe audio if no subtitles found" toggle and a library-scan `asr_fallback`. Works with any OpenAI-compatible `/v1/audio/transcriptions` server (faster-whisper-server, etc.).
+- **Content-first language detection** — subtitle language is detected from the file's actual text rather than its filename (which anime releases routinely lie about), with LLM confirmation when a filename signals multiple/dual-audio languages.
+- **Dialogue filter** — before translating a foreign fansub, ASS/SSA sign, song, karaoke, and OP/ED lines are dropped by `Style` so only real dialogue is translated (large fansubs translate in seconds instead of hanging).
+- **Ad / credit removal** — strip advert, donation-request, and fansub-credit lines from the intro/outro of downloaded subtitles (opt-in, off by default).
+- **Provider spam filter** — drop paid-subtitle scam listings (e.g. "Get A to Z … for ₹500") from provider results.
+- **Configurable watchdog timeout** — mark a file failed if it's stuck in-progress this long (default 30 min, configurable 5–180 in a new Advanced settings section).
+- **Advanced settings section** — collapsed tuning knobs for translation, scan, and show identification.
+
+### Fixed
+- English subtitles no longer misclassified as foreign and re-translated (content-first detection).
+- Foreign-sub translation no longer hangs on large fansub files (dialogue filter + fail-fast watchdog).
+- Provider enable/disable checkboxes in Settings now actually work — they read/write the `providers.enabled` list (previously they saved per-provider flags the registry ignored).
+- `model_used` now persisted for provider-downloaded translations.
+- Grab-tab wrong-show fuzzy matches rejected.
+- Logs page auto-refresh persistence; log endpoints gated behind the API key.
+
+### Security
+- Raw-log endpoints redact API keys/passwords/tokens and warn when exposed without an API key.
+
+### Changed
+- `max_retries` is no longer silently forced to 1 on every settings save (default is 3).
+
+[0.7.0]: https://github.com/completeBeta/Subber/releases/tag/v0.7.0
+
 ## [0.6.0] - 2026-08-19
 
 ### Added
