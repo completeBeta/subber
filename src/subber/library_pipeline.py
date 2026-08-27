@@ -914,6 +914,26 @@ async def _translate_and_sync(
     """
     loop = asyncio.get_running_loop()
 
+    # Resolve the show's canonical character names (best-effort) so the
+    # translator romanizes names consistently instead of guessing from audio
+    # (e.g. 瓜生 → "Umino"/"Urio"/"Uri-no" instead of the canonical "Urino").
+    # The identify cache makes this a no-op for shows already identified during
+    # the provider-search step earlier in the same scan.
+    character_map = None
+    try:
+        lib = subber_config.library_settings()
+        if lib.get("use_identification", True):
+            from .identify import parse_filename
+            parsed = parse_filename(video_path)
+            title = parsed.get("title")
+            if title:
+                tmdb_key = lib.get("tmdb_api_key", "")
+                prefer = lib.get("identify_prefer", "anilist")
+                ident = await identify_show(title, tmdb_api_key=tmdb_key, prefer=prefer)
+                character_map = ident.characters or None
+    except Exception:
+        character_map = None
+
     # Detect source language from filename or content, unless the caller already
     # knows it (the ASR path passes Whisper's detected language explicitly, since
     # the raw transcript carries a neutral filename that would otherwise read as
@@ -968,6 +988,7 @@ async def _translate_and_sync(
                     output_path=output_path,
                     source_lang=source_lang,
                     target_lang="en",
+                    character_map=character_map,
                 )
                 # Add attribution header
                 _add_attribution(output_path, backend["model"])

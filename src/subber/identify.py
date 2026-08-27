@@ -57,6 +57,9 @@ class ShowIdentity:
     anilist_title_en: Optional[str] = None
     anilist_title_romaji: Optional[str] = None
     anilist_synonyms: list[str] = field(default_factory=list)
+    # Character names for translation consistency (native Japanese → romaji).
+    # Each entry: {"native": str, "full": str} from AniList `characters`.
+    characters: list[dict] = field(default_factory=list)
 
     # From TMDB
     tmdb_id: Optional[int] = None
@@ -227,6 +230,11 @@ query ($search: String) {
       episodes
       season
       seasonYear
+      characters(sort: ROLE, perPage: 12) {
+        nodes {
+          name { full native }
+        }
+      }
     }
   }
 }
@@ -259,12 +267,25 @@ async def _query_anilist(title: str) -> Optional[ShowIdentity]:
                 return None
 
             best = media_list[0]
+            # Parse character names (native Japanese → romaji) for translation
+            # consistency — the translator uses these to romanize names reliably
+            # instead of guessing from audio.
+            char_nodes = (best.get("characters") or {}).get("nodes", [])
+            characters = []
+            for n in char_nodes:
+                name = n.get("name") or {}
+                full = (name.get("full") or "").strip()
+                native = (name.get("native") or "").strip()
+                if full and native:
+                    characters.append({"native": native, "full": full})
+
             identity = ShowIdentity(
                 source="anilist",
                 anilist_id=best["id"],
                 anilist_title_en=best["title"].get("english"),
                 anilist_title_romaji=best["title"].get("romaji"),
                 anilist_synonyms=best.get("synonyms", []) or [],
+                characters=characters,
             )
 
             # Cache the result
@@ -361,6 +382,7 @@ async def identify(
             identity.anilist_title_en = result.anilist_title_en
             identity.anilist_title_romaji = result.anilist_title_romaji
             identity.anilist_synonyms = result.anilist_synonyms
+            identity.characters = result.characters
             return identity
 
         # Fallback to TMDB
@@ -389,6 +411,7 @@ async def identify(
             identity.anilist_title_en = anilist_result.anilist_title_en
             identity.anilist_title_romaji = anilist_result.anilist_title_romaji
             identity.anilist_synonyms = anilist_result.anilist_synonyms
+            identity.characters = anilist_result.characters
             return identity
 
     # Step 3: Only filename parsing available
@@ -443,6 +466,7 @@ async def identify_batch(
                 anilist_title_en=base_identity.anilist_title_en,
                 anilist_title_romaji=base_identity.anilist_title_romaji,
                 anilist_synonyms=base_identity.anilist_synonyms[:],
+                characters=base_identity.characters[:],
                 tmdb_id=base_identity.tmdb_id,
                 tmdb_title=base_identity.tmdb_title,
                 tmdb_type=base_identity.tmdb_type,

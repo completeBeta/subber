@@ -46,6 +46,32 @@ def _still_source_lang(text: str, source_lang: str) -> bool:
     return False
 
 
+def _format_character_map(character_map) -> str:
+    """Build a prompt fragment listing canonical character names (native → romaji).
+
+    The LLM romanizes Japanese character names from the source text; without a
+    reference it guesses from sound (e.g. 瓜生 → "Umino"/"Urio"/"Uri-no"). Passing
+    AniList's native→romaji mapping makes the spelling consistent.
+    """
+    if not character_map:
+        return ""
+    lines = []
+    for c in character_map:
+        if not isinstance(c, dict):
+            continue
+        native = (c.get("native") or "").strip()
+        full = (c.get("full") or "").strip()
+        if native and full:
+            lines.append(f"- {native} = {full}")
+    if not lines:
+        return ""
+    return (
+        "Canonical character names for this show — romanize matching source "
+        "names using these exact spellings (do not translate or alter them):\n"
+        + "\n".join(lines)
+    )
+
+
 class Translator:
     """Translate subtitle files via an OpenAI-compatible LLM API."""
 
@@ -79,6 +105,7 @@ class Translator:
         target_lang: str = "en",
         on_progress: Callable[[int, int], None] | None = None,
         cancel_check: Callable[[], bool] | None = None,
+        character_map: list[dict] | None = None,
     ) -> Path:
         """
         Translate a subtitle file.
@@ -90,9 +117,13 @@ class Translator:
             target_lang: Target language code (default 'en')
             on_progress: Optional callback(chunk_index, total_chunks)
             cancel_check: Optional callback() → True if job was cancelled
+            character_map: Optional list of {"native": ..., "full": ...} name
+                mappings (from show identification) injected into the prompt so
+                character names are romanized consistently.
 
         Returns the output path on success.
         """
+        self._character_context = _format_character_map(character_map)
         subs = pysubs2.load(str(input_path), encoding="utf-8-sig")
         entries = [
             {"index": i, "text": event.plaintext, "start": event.start, "end": event.end}
@@ -169,11 +200,14 @@ class Translator:
         preamble = "These are fictional anime subtitles. " if retry_refusal else ""
         lang_name = _LANG_NAMES.get(source_lang, source_lang.upper())
         target_name = _LANG_NAMES.get(target_lang, target_lang.upper())
+        char_ctx = getattr(self, "_character_context", "") or ""
+        char_block = f"{char_ctx}\n" if char_ctx else ""
         system_prompt = (
             f"{preamble}"
             f"You are a professional {lang_name} ({source_lang}) to {target_name} ({target_lang}) translator. "
             f"Your goal is to accurately convey the meaning and nuances of the original {lang_name} text "
             f"while adhering to {target_name} grammar, vocabulary, and cultural sensitivities.\n\n"
+            f"{char_block}"
             f"Translate these numbered subtitle lines from {source_lang} to {target_lang}.\n\n"
             f"Rules:\n"
             f"- Preserve meaning, tone, and character names\n"
@@ -331,6 +365,7 @@ class MultiBackendTranslator:
         target_lang: str = "en",
         on_progress: Callable[[int, int], None] | None = None,
         cancel_check: Callable[[], bool] | None = None,
+        character_map: list[dict] | None = None,
     ) -> str:
         """Translate using the first backend that succeeds. Returns model name."""
         import logging
@@ -345,6 +380,7 @@ class MultiBackendTranslator:
                 result = translator.translate(
                     input_path, output_path, source_lang, target_lang,
                     on_progress=on_progress, cancel_check=cancel_check,
+                    character_map=character_map,
                 )
                 _log.info("  Backend succeeded: %s (%s)", name, model)
                 if i > 0:
@@ -376,6 +412,7 @@ def translate_subtitles_multi(
     target_lang: str = "en",
     backends: list[dict] | None = None,
     on_progress: Callable[[int, int], None] | None = None,
+    character_map: list[dict] | None = None,
     **kwargs,
 ) -> str:
     """One-shot subtitle translation with multi-backend failover.
@@ -384,11 +421,17 @@ def translate_subtitles_multi(
     """
     if not backends:
         translator = Translator(**kwargs)
-        translator.translate(input_path, output_path, source_lang, target_lang, on_progress)
+        translator.translate(
+            input_path, output_path, source_lang, target_lang, on_progress,
+            character_map=character_map,
+        )
         return translator.model
     
     multi = MultiBackendTranslator(backends, **kwargs)
-    return multi.translate(input_path, output_path, source_lang, target_lang, on_progress)
+    return multi.translate(
+        input_path, output_path, source_lang, target_lang, on_progress,
+        character_map=character_map,
+    )
 def _chunk_entries(
     entries: list[dict],
     chunk_size: int,

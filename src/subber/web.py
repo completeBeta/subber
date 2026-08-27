@@ -1232,7 +1232,7 @@ async def _run_grab_pipeline(
         # Helper to translate non-English subs
         ts = config.translation_settings()
         _backends = config.translation_backends()
-        def _do_translate(sub_path: Path, source_lang: str) -> tuple[Path, str]:
+        def _do_translate(sub_path: Path, source_lang: str, character_map=None) -> tuple[Path, str]:
             translated = tmp_dir / f"{sub_path.stem}.en{sub_path.suffix}"
             from .translator import translate_subtitles_multi
             model_used = translate_subtitles_multi(
@@ -1243,6 +1243,7 @@ async def _run_grab_pipeline(
                 chunk_size=ts.get("chunk_size", 50),
                 max_retries=ts.get("max_retries", 3),
                 timeout=ts.get("timeout", 120),
+                character_map=character_map,
             )
             # Inject model info into subtitle file header
             _inject_model_header(translated, model_used)
@@ -1326,6 +1327,7 @@ async def _run_grab_pipeline(
             # AniList/TMDB titles + synonyms (same as the scan).
             search_queries = [clean_title]
             lib_cfg = config.library_settings()
+            identity = None
             if lib_cfg.get("use_identification", True):
                 try:
                     tmdb_key = lib_cfg.get("tmdb_api_key", "")
@@ -1409,6 +1411,7 @@ async def _run_grab_pipeline(
                                         on_step(pipeline_result["steps"][-1])
                                     trans_result = await loop.run_in_executor(
                                         None, _do_translate, srt_path, detected,
+                                        (identity.characters if identity else None),
                                     )
                                     pipeline_result["output_path"] = str(trans_result[0])
                                     pipeline_result["model_used"] = trans_result[1]
@@ -1444,7 +1447,8 @@ async def _run_grab_pipeline(
                     on_step(pipeline_result["steps"][-1])
                 loop = asyncio.get_running_loop()
                 trans_result = await loop.run_in_executor(
-                    None, _do_translate, sub_path, best.language
+                    None, _do_translate, sub_path, best.language,
+                    (identity.characters if identity else None),
                 )
                 pipeline_result["output_path"] = str(trans_result[0])
                 pipeline_result["model_used"] = trans_result[1]
