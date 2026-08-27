@@ -2,6 +2,14 @@
 
 All notable changes to Subber are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/), and this project versions with [SemVer](https://semver.org/).
 
+## [0.7.1] - 2026-08-27
+
+### Fixed
+- ASR (Whisper) transcripts no longer include song/BGM vocalization — a single ending theme was surfacing as ~12,000 characters of "oooh"/"おおおお" (~60% of the file) and burning translation credits. Long runs of a single repeated syllable are dropped before the SRT is written.
+- Translation no longer leaves untranslated source-language lines — when the LLM omits a line number (duplicate/hallucinated segments) or passes source text through (truncated response), those lines are retried once instead of leaking Japanese/Korean/Chinese into the final file.
+
+[0.7.1]: https://github.com/completeBeta/Subber/releases/tag/v0.7.1
+
 ## [0.7.0] - 2026-08-27
 
 ### Added
