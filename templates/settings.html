@@ -517,11 +517,16 @@ async function loadSettings() {
         document.getElementById('cfg-api-key').value = (cfg.ui?.api_key) || '';
         // Provider toggles
         const prov = cfg.providers || {};
-        document.getElementById('cfg-prov-embedded').checked = prov.embedded !== false;
-        document.getElementById('cfg-prov-subdl').checked = prov.subdl !== false;
-        document.getElementById('cfg-prov-gestdown').checked = prov.gestdown !== false;
-        document.getElementById('cfg-prov-podnapisi').checked = prov.podnapisi !== false;
-        document.getElementById('cfg-prov-opensubtitles').checked = prov.opensubtitles !== false;
+        // The enabled LIST (not the per-provider flags) is what
+        // build_provider_registry actually reads, so the checkboxes must
+        // reflect list membership — otherwise toggling a provider here has
+        // no effect on which sources get searched.
+        const provEnabled = Array.isArray(prov.enabled) ? prov.enabled : [];
+        document.getElementById('cfg-prov-embedded').checked = provEnabled.includes('embedded');
+        document.getElementById('cfg-prov-subdl').checked = provEnabled.includes('subdl');
+        document.getElementById('cfg-prov-gestdown').checked = provEnabled.includes('gestdown');
+        document.getElementById('cfg-prov-podnapisi').checked = provEnabled.includes('podnapisi');
+        document.getElementById('cfg-prov-opensubtitles').checked = provEnabled.includes('opensubtitles');
                 document.getElementById('subdl-api-key').value = prov.subdl?.api_key || '';
         document.getElementById('subdl-pro-mode').checked = (cfg.providers?.subdl?.pro_mode) || false;
         // OpenSubtitles settings — detect active mode (vip = username/password,
@@ -806,6 +811,12 @@ async function saveSettings() {
         {
             section: 'providers',
             values: {
+                // The enabled list is the single source of truth for
+                // build_provider_registry. Derive it from the checkboxes so
+                // toggling a provider actually enables/disables it. Credentials
+                // below stay intact either way, so re-enabling never loses them.
+                enabled: ['embedded', 'subdl', 'gestdown', 'podnapisi', 'opensubtitles']
+                    .filter(p => document.getElementById('cfg-prov-' + p).checked),
                 embedded: document.getElementById('cfg-prov-embedded').checked,
                 subdl: { api_key: document.getElementById('subdl-api-key').value, pro_mode: document.getElementById('subdl-pro-mode').checked },
                 gestdown: document.getElementById('cfg-prov-gestdown').checked,
