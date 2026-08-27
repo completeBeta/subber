@@ -12,9 +12,11 @@ provider can supply a subtitle. Opt-in: ``asr.mode`` must be ``"auto"`` (default
 from __future__ import annotations
 
 import logging
+import re
 import subprocess
 import tempfile
 import time
+from collections import Counter
 from pathlib import Path
 
 import httpx
@@ -150,6 +152,23 @@ def _normalize_language(lang: str) -> str:
     return _LANG_ALIASES.get(l, l)
 
 
+def _is_vocalization(text: str) -> bool:
+    """Detect song/BGM vocalization — a long run of a single repeated syllable
+    ("oooh oooh oooh", "la la la", "おおおおお", …) rather than dialogue.
+
+    Heuristic: after lowercasing and stripping whitespace/punctuation, the text
+    is long and dominated by its two most common characters (>= 80%). Real
+    dialogue has far more character variety.
+    """
+    norm = re.sub(r"[\W_]+", "", (text or "").lower())
+    if len(norm) < 16:
+        return False
+    counts = Counter(norm)
+    total = sum(counts.values())
+    top2 = sum(v for _, v in counts.most_common(2))
+    return (top2 / total) >= 0.80
+
+
 def transcribe_video(video_path: Path, out_srt: Path, asr_cfg: dict) -> dict:
     """Full pipeline: extract audio -> transcribe -> write SRT.
 
@@ -179,6 +198,17 @@ def transcribe_video(video_path: Path, out_srt: Path, asr_cfg: dict) -> dict:
         segments = [{"start": 0.0, "end": duration, "text": text}]
     if not segments:
         raise RuntimeError("transcription returned no text")
+
+    # Drop song/BGM vocalization segments before writing — they're not dialogue
+    # and would bloat the transcript and burn translation credits. (A single ED
+    # theme can surface as thousands of "oooh"/"おおおお" characters.)
+    kept = [s for s in segments if not _is_vocalization(s.get("text") or "")]
+    dropped = len(segments) - len(kept)
+    if dropped:
+        _log.info("[ASR] Dropped %d vocalization segment(s) (song/BGM)", dropped)
+    if not kept:
+        raise RuntimeError("transcription contained only vocalization (no dialogue)")
+    segments = kept
 
     out_srt.write_text(segments_to_srt(segments), encoding="utf-8")
     _log.info("[ASR] Wrote SRT with %d segment(s) to %s", len(segments), out_srt.name)

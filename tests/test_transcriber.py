@@ -6,6 +6,7 @@ import pytest
 
 from subber.transcriber import (
     _fmt_ts,
+    _is_vocalization,
     extract_audio,
     segments_to_srt,
     transcribe_file,
@@ -30,6 +31,18 @@ def test_segments_to_srt():
     assert "1\n00:00:00,000 --> 00:00:02,000\nHello there" in srt
     assert "2\n00:00:02,000 --> 00:00:04,500\nGeneral Kenobi" in srt
     assert srt.strip().endswith("General Kenobi")  # blank segment not emitted
+
+
+def test_is_vocalization():
+    # Song/BGM vocalization — long runs of a single repeated syllable
+    assert _is_vocalization("Oooh oooh oooh oooh oooh oooh oooh oooh") is True
+    assert _is_vocalization("おおおおおおおおおおおおおおおお") is True
+    assert _is_vocalization("la la la la la la la la") is True
+    # Normal dialogue / short interjections are NOT vocalization
+    assert _is_vocalization("クラスの子です") is False
+    assert _is_vocalization("Hello, how are you today?") is False
+    assert _is_vocalization("oh!") is False
+    assert _is_vocalization("") is False
 
 
 def test_transcribe_file_failover(monkeypatch, tmp_path):

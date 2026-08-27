@@ -31,6 +31,21 @@ _LANG_NAMES = {
 }
 
 
+# Characters of CJK scripts — used to detect source-language text that survived
+# translation (the "leftover untranslated Japanese" leak).
+_CJK_RE = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]")
+
+
+def _still_source_lang(text: str, source_lang: str) -> bool:
+    """True when text still looks like it's in the source language's script.
+
+    Only reliable for CJK sources (ja/zh/ko) — Latin-script languages share the
+    alphabet, so those return False (best-effort only)."""
+    if source_lang in ("ja", "zh", "ko"):
+        return bool(_CJK_RE.search(text or ""))
+    return False
+
+
 class Translator:
     """Translate subtitle files via an OpenAI-compatible LLM API."""
 
@@ -107,6 +122,26 @@ class Translator:
 
             for idx, text in parsed.items():
                 translated[idx] = text
+
+        # Retry any entries still in the source language — the LLM can omit line
+        # numbers (duplicate/hallucinated segments) or pass source text straight
+        # through (e.g. a truncated response on a huge vocalization chunk),
+        # leaving those lines untranslated in the final file. Re-send them once
+        # so a mixed chunk can't leak source-language text.
+        if source_lang not in ("en", "eng", "english"):
+            leftover = [
+                e for e in entries
+                if e["index"] not in translated
+                or _still_source_lang(translated[e["index"]], source_lang)
+            ]
+            if leftover:
+                try:
+                    retry_text = self._translate_chunk(leftover, source_lang, target_lang)
+                    for idx, text in _parse_numbered_response(retry_text).items():
+                        if not _still_source_lang(text, source_lang):
+                            translated[idx] = text
+                except Exception:
+                    pass  # retry is best-effort — keep the main-pass results
 
         # Apply translations back to the subtitle events
         for i, event in enumerate(subs.events):
