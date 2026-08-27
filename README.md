@@ -228,6 +228,61 @@ If you purchased an API package at [opensubtitles.com](https://www.opensubtitles
 
 > **Free vs Developer** are consumer-key flags, not paid plans: "Allow anonymous downloads" caps a key at 5/day, and the "Under dev" flag raises it to 100/day without authentication. Light and above are paid API subscriptions — ad-free, and only **downloads** are limited (search and other endpoints are unlimited, subject to a per-IP request rate of 5 req/s free → 50 req/s Basic and up). Yearly billing gives a 20% discount.
 
+## 🎙️ Audio Transcription (ASR / Whisper)
+
+When a video has **no embedded subtitle and no provider match**, Subber can generate subtitles itself by transcribing the audio track with a self-hosted [Whisper](https://github.com/openai/whisper) server. This is opt-in and **off by default**.
+
+### How it works
+
+1. **Extract** — ffmpeg pulls the audio track into a mono 16 kHz WAV (Whisper's preferred input).
+2. **Transcribe** — the audio is sent to your server's OpenAI-compatible `/v1/audio/transcriptions` endpoint (`response_format=verbose_json`).
+3. **Write** — Whisper's timestamped segments become an `.srt`.
+4. **Translate** — if the detected language isn't English, the transcript is auto-translated through your LLM backend chain (the same path as a downloaded subtitle).
+
+### Running a Whisper server
+
+Subber talks to any OpenAI-compatible Whisper server, e.g. [faster-whisper-server](https://github.com/fedirz/faster-whisper-server) or an equivalent. Run it somewhere on your network and point Subber at its URL.
+
+- **GPU strongly recommended** — CPU transcription is far slower than realtime.
+- **Model** — `large-v3-turbo` is the recommended sweet spot: on a modest GPU it transcribes at roughly **12× realtime** (a 20-minute episode in ~1¾ minutes). Larger models like `large-v3` can run out of VRAM on 8 GB cards.
+- Any faster-whisper size alias (`tiny` → `large-v3`) or a HuggingFace repo id works.
+
+### Configure it in Subber
+
+**Settings → 🎙️ Audio Transcription (ASR):**
+
+- **Transcription mode** — `Auto` (enables the Grab-tab transcribe checkbox) or `Off`.
+- **Whisper model** — `large-v3-turbo` (recommended).
+- **Language** — `auto` to auto-detect, or a Whisper code (`ja`, `ko`, `en`, …) to force one.
+- **Whisper server URL** — e.g. `http://your-server:9000`.
+- **Whisper server API key** — only if your server requires a Bearer token.
+
+Then turn on the fallback where you want it:
+
+- **Grab tab** — tick **"Transcribe audio if no subtitles found"** on an upload.
+- **Library scans** — enable **Library Settings → "Transcribe audio when no subtitle found"**.
+
+Or set it directly in `config/config.yaml`:
+
+```yaml
+asr:
+  mode: auto                    # off | auto
+  model: large-v3-turbo
+  language: auto                # auto | a whisper code (ja, ko, en, ...)
+  timeout: 600                  # per-request seconds for the transcription call
+  max_audio_seconds: 3600       # hard cap — abort if the audio is longer than this
+  backends:                     # ordered failover
+    - name: Whisper (local)
+      url: http://your-server:9000
+      api_key: ""               # only if your server requires one
+      model: large-v3-turbo     # optional per-backend override
+
+library:
+  asr_fallback: true            # transcribe when a scan finds no subtitle
+```
+
+Multiple `asr.backends` are tried in order (failover) until one returns HTTP 200.
+
 ## 🤖 LLM Backends
 
 Subber uses a multi-backend translator with automatic fallback. **Recommended setup:**
