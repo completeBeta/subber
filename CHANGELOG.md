@@ -2,6 +2,16 @@
 
 All notable changes to Subber are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/), and this project versions with [SemVer](https://semver.org/).
 
+## [0.9.2] - 2026-08-28
+
+### Fixed
+- Library page no longer cramps its 10-column table into a 600px-wide container — it now uses the intended 1000px layout, so the table and empty-state message render without horizontal clipping on desktop.
+
+### Changed
+- README screenshots refreshed (clean empty-state captures).
+
+[0.9.2]: https://github.com/completeBeta/Subber/releases/tag/v0.9.2
+
 ## [0.9.1] - 2026-08-28
 
 ### Fixed
