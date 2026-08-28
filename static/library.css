@@ -250,4 +250,9 @@
     /* Table is already in an overflow-x:auto wrapper — widen nothing,
        just keep cells from forcing extra page width. */
     .library-table-wrapper { max-width: 100%; }
+
+    /* Pagination: wrap the First/Prev/Next/Last buttons instead of
+       overflowing both edges on narrow screens. */
+    .library-pagination { flex-wrap: wrap; gap: 0.5rem; }
+    .library-pagination button { padding: 0.5rem 0.85rem; }
 }
