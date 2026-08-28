@@ -2,6 +2,13 @@
 
 All notable changes to Subber are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/), and this project versions with [SemVer](https://semver.org/).
 
+## [0.9.1] - 2026-08-28
+
+### Fixed
+- Library pagination (First/Prev/Next/Last) no longer overflows both screen edges on phones — the controls wrap and get larger touch targets.
+
+[0.9.1]: https://github.com/completeBeta/Subber/releases/tag/v0.9.1
+
 ## [0.9.0] - 2026-08-28
 
 ### Added
