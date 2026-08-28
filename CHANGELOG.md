@@ -2,6 +2,13 @@
 
 All notable changes to Subber are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/), and this project versions with [SemVer](https://semver.org/).
 
+## [0.9.3] - 2026-08-28
+
+### Changed
+- README accuracy pass — tab and Settings descriptions now match the actual UI (Default Languages, Subtitle Sync, Subtitle Providers, Library Settings), added missing controls (Search Season/Episode, Grab ASR checkbox, Database Backups Import DB), documented `scanner.py`, removed the now-shipped "mobile responsiveness" feature request, and fixed the security curl example.
+
+[0.9.3]: https://github.com/completeBeta/Subber/releases/tag/v0.9.3
+
 ## [0.9.2] - 2026-08-28
 
 ### Fixed

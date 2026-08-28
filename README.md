@@ -113,6 +113,7 @@ Upload one or more video files (or a `.zip` of videos) and Subber runs the full 
 **Controls:**
 - **Browse / drag-and-drop** — add video files or a zip batch
 - **Auto-sync with ffsubsync** checkbox — toggle audio alignment on/off
+- **Transcribe audio if no subtitles found** checkbox — if no subtitle is found, transcribe the audio via ASR (requires ASR configured in Settings)
 - **Start Processing** — begin the pipeline on the selected files
 - **Clear** — remove the selected files before processing
 - **Pipeline log** (expandable) — live per-file progress
@@ -150,6 +151,7 @@ Search all enabled providers by show name or video path, and download a specific
 
 **Controls:**
 - **Search box** — type a show name (text search) or paste a video path (hash-based matching, more accurate)
+- **Season / Episode** (optional) — narrow TV results to an exact episode
 - **Search** — run the query across providers
 - **Download** (per result) — fetch that subtitle file
 
@@ -170,14 +172,14 @@ Full configuration UI. **Save Settings** persists everything (with validation th
 
 - **Cost Estimation** — per-token pricing with peak-hour multipliers (**+ Add Range**)
 - **Translation Providers** — add/remove LLM backends with priority ordering (**+ Add Backend**)
-- **Default Languages** — preferred subtitle language order and acceptable track types
-- **Subtitle Sync** — sync engine and drift threshold
-- **Subtitle Providers** — enable/disable providers and enter credentials (SubDL key, OpenSubtitles, Gestdown)
-- **Library Settings** — scan paths, concurrency, auto-scan interval, the **Transcribe audio when no subtitle found** fallback toggle, and **Ad / Credit Removal** mode
+- **Default Languages** — source and target language defaults
+- **Subtitle Sync** — sync engine and default offset
+- **Subtitle Providers** — enable/disable providers and enter credentials (SubDL key, OpenSubtitles org/.com)
+- **Library Settings** — **Ad / Credit Removal** mode, the Dry-Run default, and the **Transcribe audio when no subtitle found** fallback toggle
 - **🎙️ Audio Transcription (ASR)** — self-hosted Whisper server URL, model, language, and mode
 - **📺 Show Identification** — TMDB API key (AniList needs no key)
 - **Library Mounts (SMB/CIFS)** — add mounts (**+ Add Mount**), **Test** a share, **Remove** it
-- **💾 Database Backups** — **Backup Now**, **Refresh** the list, **Restore**, or delete a backup
+- **💾 Database Backups** — **Backup Now**, **Import DB**, **Refresh** the list, **Restore**, or delete a backup
 - **⚠ Caution Zone** — upload size and minimum-free-disk limits
 - **🔒 Security** — optional API key to protect write operations
 - **⚙️ Advanced** (collapsed) — watchdog timeout, translation tuning (temperature, chunk size, retries), scan tuning (drift threshold, concurrency, interval), and show-identification preferences
@@ -327,7 +329,7 @@ curl -X POST http://localhost:8676/api/library/scan ...
 
 # With API key set: all writes require the header
 curl -X POST http://localhost:8676/api/library/scan \
-  -H "X-API-Key: your-key-here" ...
+  -H "X-API-Key: YOUR_KEY_HERE"
 ```
 
 GET endpoints (read-only) are always open. Write endpoints (scan, translate, grab, settings changes) require the `X-API-Key` header **only when a key is configured**. When no key is set, writes are open — so you can always set your first key via the Settings UI.
@@ -363,6 +365,7 @@ src/subber/
 ├── ad_removal.py       # Strip ad/credit lines from downloaded subs
 ├── downloader.py       # Subtitle download handling
 ├── safewrite.py        # Safe subtitle file writes
+├── scanner.py          # Media scanner — finds video files + subtitle companions
 ├── logsanitize.py      # Secret redaction for logs/diagnostics
 ├── rate_limit.py       # Provider rate limiting
 ├── types.py            # Shared data types
@@ -404,7 +407,7 @@ docker compose up -d --build
 
 - Runs on port `8676` by default (set `SUBBER_PORT` in `docker-compose.yml` to change it)
 - Volume mounts: `./uploads`, `./config`, `./data` (SQLite + logs + reports + stats)
-- Library mount: `/mnt/test_library` → your media directory
+- Library mount: `/mnt/library` → your media directory (mapped from your host path in `docker-compose.yml`)
 - Host networking mode (required for provider API access)
 - Auto-cleanup: temporary files removed after 24 hours
 - Logs: daily rotation with 45-day retention at `/app/data/subber.log`
@@ -426,7 +429,7 @@ pip install -e ".[dev]"
 ## 📋 Requirements
 
 - **Docker** with Docker Compose
-- **SMB/CIFS mounts** (optional): container needs `cap_add: [SYS_ADMIN, DAC_READ_SEARCH]` in `docker-compose.yml`
+- **SMB/CIFS mounts** (optional): container runs with `privileged: true` in `docker-compose.yml` (required for SMB mount support)
 - **cifs-utils**: installed automatically in the Docker image (for SMB mount support)
 - **Translation**: OpenRouter API key (recommended — Llama 3.1 8B), or DeepSeek/Ollama for local/alternative
 - **Subtitles**: free API keys from SubDL and OpenSubtitles (optional but recommended)
@@ -441,10 +444,6 @@ Key sections: `translation.backends`, `providers`, `library`, `sync`, `cost`, `l
 
 - **Per-category library scans** — scan only Movies or only TV shows instead of the whole library at once.
 
-## 💡 Feature Requests
-
-- **Full mobile responsiveness** — make the whole UI (nav, tables, forms, banners) usable on phone-sized screens.
-
 ## 🐛 Reporting Issues
 
 Found a bug or something behaving oddly? Report it on [GitHub Issues](https://github.com/completeBeta/Subber/issues/new/choose) — that's the one place all reports go, so nothing gets lost.
@@ -455,7 +454,7 @@ Include these six things to make it quick to diagnose:
 2. **What you did** — which tab, what file, what you clicked.
 3. **What you expected vs. what actually happened.**
 4. **The exact error message** — paste the text, or attach a screenshot (blur anything private first).
-5. **Your version** — shown in the footer of every page (e.g. `v0.7.0`).
+5. **Your version** — shown in the footer of every page (e.g. `v0.9.2`).
 6. **When it started** — right after an update, or has it always done this?
 
 > ⚠️ **Privacy:** the Diagnostics bundle is redacted (API keys, passwords, and IPs are masked), so it's safe to attach publicly. The raw logs under **Logs → Export Full History** are *not* redacted — don't post those publicly.
