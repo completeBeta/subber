@@ -2,6 +2,18 @@
 
 All notable changes to Subber are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/), and this project versions with [SemVer](https://semver.org/).
 
+## [0.9.0] - 2026-08-28
+
+### Added
+- **Mobile responsiveness** — the whole UI now adapts to phones and tablets:
+  - The 6-tab nav collapses into a 3×2 grid on narrow screens so every tab stays visible and tappable (previously the last tabs were silently clipped off-screen).
+  - Library filter controls wrap and the search box takes a full row (was causing horizontal page overflow).
+  - Settings' OpenSubtitles auth-mode radios wrap instead of overflowing.
+  - Wide tables (Library, Sync preview) scroll horizontally inside their own containers.
+  - Tightened card padding, enlarged touch targets, and ≥16px inputs (prevents iOS auto-zoom on focus); the Translate From/To row stacks on very small screens.
+
+[0.9.0]: https://github.com/completeBeta/Subber/releases/tag/v0.9.0
+
 ## [0.8.0] - 2026-08-27
 
 ### Added
