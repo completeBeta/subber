@@ -627,3 +627,62 @@ footer {
     color: var(--text-muted);
     font-size: 0.8rem;
 }
+
+/* ── Responsive / Mobile ── */
+
+/* Phones (≤640px) */
+@media (max-width: 640px) {
+    body { padding: 1rem 0.75rem; }
+    header { margin-bottom: 1rem; }
+    header h1 { font-size: 1.6rem; }
+
+    /* Tab bar: collapse the 6 tabs into a 3×2 grid so every tab is
+       visible and tappable on narrow screens (no hidden scroll). */
+    .tab-bar {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        overflow: hidden;
+    }
+    .tab-bar .tab {
+        flex: none;
+        white-space: nowrap;
+        padding: 0.7rem 0.4rem;
+        border-right: 1px solid var(--border);
+        border-bottom: 1px solid var(--border);
+    }
+    .tab-bar .tab:nth-child(3n) { border-right: none; }
+    .tab-bar .tab:nth-child(n+4) { border-bottom: none; }
+
+    /* Tighten card padding so content fits comfortably */
+    .upload-card, .history-card, .grab-card,
+    .settings-card, .sync-card, .search-card { padding: 1rem; }
+
+    /* Comfortable touch targets (≥44px tall) */
+    .btn-primary { padding: 0.85rem; }
+    .btn-cancel { padding: 0.7rem; }
+    .form-group input, .form-group select,
+    .option select, .search-form input[type="text"] { padding: 0.7rem 0.75rem; }
+    /* ≥16px font stops iOS auto-zooming the page on input focus */
+    .form-group input, .form-group select,
+    .option select, .search-form input[type="text"] { font-size: 1rem; }
+
+    /* Translate From→To row wraps gracefully on narrow screens */
+    .options-row { flex-wrap: wrap; gap: 0.5rem; }
+    .options-row .option { flex: 1 1 42%; min-width: 8rem; }
+
+    /* Search results: let the download button drop under the filename */
+    .result-item { flex-wrap: wrap; }
+
+    /* Settings: OpenSubtitles auth-mode radios wrap instead of overflowing */
+    .os-mode-row { flex-wrap: wrap; gap: 0.6rem 1.2rem; }
+
+    /* Sync preview: scroll wide tables horizontally */
+    .sync-preview { overflow-x: auto; }
+    .sync-preview table { min-width: 460px; }
+}
+
+/* Very small phones (≤400px) */
+@media (max-width: 400px) {
+    .options-row .option { flex: 1 1 100%; }
+    .options-row .arrow { display: none; }
+}

@@ -229,4 +229,25 @@
         border-radius: 8px;
         margin: 0 0 0.5rem 0;
     }
+
+    /* Status bar: tidy responsive grid instead of ragged flex-wrap */
+    .library-status-bar {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
+        gap: 0.75rem 0.5rem;
+    }
+    .stat-item { align-items: flex-start; }
+
+    /* Filter controls: let groups wrap and the search box take a full row */
+    .library-controls { gap: 0.6rem; }
+    .library-controls .control-group { flex-wrap: wrap; }
+    .library-controls #search-input {
+        flex: 1 1 100%;
+        min-width: 0;
+        width: 100%;
+    }
+
+    /* Table is already in an overflow-x:auto wrapper — widen nothing,
+       just keep cells from forcing extra page width. */
+    .library-table-wrapper { max-width: 100%; }
 }
