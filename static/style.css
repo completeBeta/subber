@@ -50,6 +50,9 @@ main {
     gap: 1.5rem;
 }
 
+/* Library page needs a wider canvas for its 10-column table */
+main.main-wide { max-width: 1000px; }
+
 .upload-card, .history-card, .grab-card {
     background: var(--surface);
     border: 1px solid var(--border);
