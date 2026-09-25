@@ -716,9 +716,16 @@ async def _detect_subtitle_status(file_path: Path) -> tuple[str, list[str]]:
 _cancelled_scans: set[int] = set()
 
 def cancel_scan(scan_id: int) -> bool:
+    """Cancel a scan that is running OR paused.
+
+    A paused scan must be cancellable too: startup reconciliation pauses a scan
+    orphaned by a container restart, and while an active (paused) scan row exists
+    the Library page keeps both scan buttons disabled and /api/library/scan
+    answers 409 — so refusing to cancel it would leave the operator stuck.
+    """
     try:
         scan = library_db.get_scan(scan_id)
-        if scan and scan.get("status") == "running":
+        if scan and scan.get("status") in ("running", "paused"):
             library_db.update_scan(scan_id, status="cancelled", error_message="Cancelled by user")
             return True
     except Exception:

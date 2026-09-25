@@ -2,6 +2,40 @@
 
 All notable changes to Subber are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/), and this project versions with [SemVer](https://semver.org/).
 
+## [0.10.0] - 2026-09-25
+
+### Added
+- **Auto-scan type** (Settings → Advanced tuning, next to Auto-scan interval): the
+  recurring auto-scan can now run "New files only (incremental)" — the default —
+  instead of always re-checking the whole library (`library.auto_scan_type`).
+  "Full library scan" is still one dropdown click away. Previously the scheduler
+  hardcoded a full scan, so every interval re-walked every file on the media disks.
+- **Startup reconciliation of orphaned scans**: a scan left `running` by a hard kill
+  (SIGKILL / OOM / VM reset — the app only records a `shutdown` lifecycle event on a
+  graceful exit) is now marked `paused` at startup with an explanation, and its
+  orphaned `in_progress` files are returned to `pending`. Before this, a 12-day-old
+  scan row kept the Library page on a phantom "Scanning…" bar at its last percentage,
+  left both scan buttons disabled, answered `409 already running` to every new scan,
+  and let the 30-minute stale-progress watchdog burn the in-flight files to `failed`
+  ("Hung >30 min during processing (watchdog)"). Resume reuses the populated file
+  list (`skip_walk`), so continuing does not repeat the filesystem walk.
+
+### Fixed
+- Translation failover no longer aborts with `'NoneType' object has no attribute
+  'strip'` when an OpenAI-compatible backend answers `{"message": {"content": null}}`
+  (empty or filtered completion); the retry loop now also covers
+  AttributeError/ValueError, and the underlying cause is appended to
+  "Translation API call failed after N attempts" instead of being discarded.
+- ASR: an unreadable backend body (non-JSON / invalid UTF-8, e.g. a proxy error page)
+  is reported with its HTTP status and a body snippet and fails over to the next
+  backend, instead of surfacing a raw codec error and skipping the remaining backends.
+- `DELETE /api/library/scan/{id}` (Cancel) now also cancels a **paused** scan, not just
+  a running one, so an orphaned or operator-paused scan can no longer deadlock the page.
+- `/api/logs/diagnostics` no longer raises `NameError: name 'library_db' is not defined`
+  — `last_scan` and `hung_files` now populate (using the real DB column names).
+
+[0.10.0]: https://github.com/completeBeta/subber/releases/tag/v0.10.0
+
 ## [0.9.3] - 2026-08-28
 
 ### Changed

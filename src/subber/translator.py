@@ -273,9 +273,20 @@ class Translator:
                 data = resp.json()
                 # Completion API returns choices[0]["text"], chat API returns choices[0]["message"]["content"]
                 choice = data["choices"][0]
-                content = choice.get("text") or choice.get("message", {}).get("content", "")
+                # `or ""` matters: OpenAI-compatible servers (OpenRouter included)
+                # answer {"message": {"content": null}} for an empty or filtered
+                # completion, and .get("content", "") does NOT cover an explicit
+                # null — that used to raise "'NoneType' object has no attribute
+                # 'strip'" and abort the whole backend failover chain.
+                content = (
+                    choice.get("text")
+                    or (choice.get("message") or {}).get("content")
+                    or ""
+                )
+                if not isinstance(content, str):
+                    content = ""
                 return content.strip()
-            except (httpx.HTTPError, KeyError, IndexError) as e:
+            except (httpx.HTTPError, KeyError, IndexError, AttributeError, ValueError) as e:
                 last_error = e
                 if attempt < self.max_retries - 1:
                     delay = 2 ** attempt  # 1s, 2s, 4s
@@ -283,6 +294,7 @@ class Translator:
 
         raise RuntimeError(
             f"Translation API call failed after {self.max_retries} attempts"
+            + (f": {last_error}" if last_error else "")
         ) from last_error
 
     def identify_language(self, text: str) -> str:

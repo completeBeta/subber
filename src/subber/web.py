@@ -2169,7 +2169,9 @@ async def _auto_scan_scheduler() -> None:
     auto-scan silently did nothing. This loop:
       - checks config every 10 minutes,
       - skips if interval is 0 (manual) or a scan is already active/paused,
-      - triggers a full scan when the configured interval has elapsed.
+      - triggers a scan of type `library.auto_scan_type` when the interval has
+        elapsed: "incremental" (new files only — the default, cheapest on the
+        media disks) or "full" (re-check the whole tree).
     """
     _last_auto_scan = time.monotonic()  # don't fire immediately on startup
     while True:
@@ -2190,10 +2192,21 @@ async def _auto_scan_scheduler() -> None:
             if elapsed < interval_hours * 3600:
                 continue
 
-            _log.info("Auto-scan scheduler: interval %dh elapsed — starting full scan", interval_hours)
-            scan_id = await _launch_library_scan("full")
+            scan_type = str(lib_cfg.get("auto_scan_type", "incremental") or "incremental").lower()
+            if scan_type not in ("full", "incremental"):
+                _log.warning(
+                    "Auto-scan scheduler: unknown auto_scan_type %r — using incremental",
+                    scan_type,
+                )
+                scan_type = "incremental"
+
+            _log.info(
+                "Auto-scan scheduler: interval %dh elapsed — starting %s scan",
+                interval_hours, scan_type,
+            )
+            scan_id = await _launch_library_scan(scan_type)
             _last_auto_scan = time.monotonic()
-            _log.info("Auto-scan scheduler: started scan %d", scan_id)
+            _log.info("Auto-scan scheduler: started scan %d (%s)", scan_id, scan_type)
         except Exception as e:
             _log.warning("Auto-scan scheduler error: %s", e)
 
@@ -3018,9 +3031,13 @@ async def api_logs_diagnostics(_=Depends(_require_write_auth)):
 
     # Scan state
     try:
-        history = library_db.get_scan_history(limit=1)
+        history = _libdb.get_scan_history(limit=1)
         status = history[0] if history else None
-        bundle["last_scan"] = {k: status.get(k) for k in ("id", "status", "total_files", "processed_files", "failed_files")} if status else None
+        bundle["last_scan"] = {
+            k: status.get(k)
+            for k in ("id", "scan_type", "status", "files_total", "files_processed",
+                      "files_failed", "started_at", "completed_at", "error_message")
+        } if status else None
     except Exception:
         bundle["last_scan"] = None
 
@@ -3079,7 +3096,7 @@ async def api_logs_diagnostics(_=Depends(_require_write_auth)):
 
     # Hung-file history: any files currently stuck 'in_progress' > 30 min
     try:
-        stale = library_db.get_stale_in_progress(minutes=30)
+        stale = _libdb.get_stale_in_progress(minutes=30)
         bundle["hung_files"] = [
             {"id": s.get("id"), "minutes_stale": s.get("minutes_stale"),
              "path": _redact_line(str(s.get("file_path", "?")))}
@@ -3203,6 +3220,9 @@ async def startup():
         _log.warning("Could not record boot event: %s", e)
 
     _load_grab_state()
+    # Runs before the watchdog task so an orphaned scan is paused (and its file
+    # rows put back to pending) instead of being burned to 'failed' 30 min later.
+    _reconcile_orphaned_scans()
     asyncio.create_task(_cleanup_expired())
     asyncio.create_task(_stale_in_progress_watchdog())
     asyncio.create_task(_auto_scan_scheduler())
@@ -3239,6 +3259,57 @@ async def _log_shutdown() -> None:
         _record_lifecycle_event("shutdown")
     except Exception:
         pass
+
+
+def _reconcile_orphaned_scans() -> None:
+    """Reconcile a scan orphaned by a hard kill (SIGKILL, OOM, VM reset).
+
+    A scan row only reaches completed/failed/cancelled through normal control
+    flow, so when the process dies mid-scan — the lifecycle log shows boots with
+    no matching shutdown — the row stays 'running' forever. The Library page then
+    shows a phantom "Scanning..." bar at its last percentage, disables both scan
+    buttons, and /api/library/scan answers 409 "already running", so the only way
+    out is Cancel; meanwhile the orphaned file rows are burned to 'failed' by the
+    30-minute stale-progress watchdog.
+
+    At startup there is by definition no live scan task, so:
+      - a 'running' scan becomes 'paused' (the UI then offers Resume, and the
+        resume endpoint services it with skip_walk=True — no repeat 24K-file
+        CIFS walk),
+      - orphaned 'in_progress' files go back to 'pending' so Resume re-processes
+        them instead of the watchdog marking them failed.
+    """
+    try:
+        active = _libdb.get_active_scan()
+    except Exception as e:
+        _log.warning("Orphan-scan reconciliation: lookup failed: %s", e)
+        return
+    if not active:
+        return
+    try:
+        scan_id = active["id"]
+        status = active.get("status")
+        if status != "running":
+            # Already paused by the operator — nothing to reconcile here; the
+            # resume path resets its own stale in_progress rows.
+            return
+        _libdb.update_scan(
+            scan_id,
+            status="paused",
+            error_message=(
+                "Interrupted by a restart (no live scan task at startup) — "
+                "Resume to continue from the existing file list, or Cancel."
+            ),
+        )
+        reset = _libdb.mark_stale_in_progress()  # in_progress -> pending
+        _log.warning(
+            "Orphan-scan reconciliation: scan %s was left 'running' by a killed "
+            "process — marked paused for Resume; reset %d orphaned in_progress "
+            "file(s) to pending",
+            scan_id, reset,
+        )
+    except Exception as e:
+        _log.warning("Orphan-scan reconciliation failed: %s", e)
 
 
 async def _stale_in_progress_watchdog() -> None:

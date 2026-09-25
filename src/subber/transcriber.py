@@ -100,7 +100,22 @@ def transcribe_file(
                     name, resp.status_code, (resp.text or "")[:200],
                 )
                 continue
-            payload = resp.json()
+            try:
+                payload = resp.json()
+            except ValueError as e:
+                # A non-JSON or non-UTF-8 body (proxy error page, latin-1 log
+                # output) used to surface as a raw codec error — "'utf-8' codec
+                # can't decode byte 0xe9 in position 2638" — which hid the real
+                # cause. Report the status + body and fail over instead.
+                body = resp.content.decode("utf-8", errors="replace")
+                errors.append(
+                    f"{name}: unreadable response (HTTP {resp.status_code}): {body[:200]}"
+                )
+                _log.warning(
+                    "[ASR] backend '%s' returned an unreadable body (HTTP %d): %s (%s)",
+                    name, resp.status_code, body[:200], e,
+                )
+                continue
             _log.info(
                 "[ASR] backend '%s' OK: %d segment(s)",
                 name, len(payload.get("segments") or []),

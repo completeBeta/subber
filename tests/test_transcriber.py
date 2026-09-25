@@ -125,3 +125,72 @@ def test_extract_audio(tmp_path):
     ).stdout
     assert "sample_rate=16000" in out
     assert "channels=1" in out
+
+
+def test_transcribe_file_reports_unreadable_body(monkeypatch, tmp_path):
+    """A non-JSON / non-UTF-8 200 response must fail over with a readable reason.
+
+    Production evidence (2026-09-12, Elusive Samurai S1E6):
+        ASR failed: 'utf-8' codec can't decode byte 0xe9 in position 2638
+    — the raw codec error replaced the real cause (status + body), and because it
+    was raised out of ``resp.json()`` inside the per-backend try, the next backend
+    was never tried.
+    """
+    import subber.transcriber as tr
+
+    class BadResp:
+        status_code = 200
+        content = b'{"text": "caf\xe9"}'
+
+        def json(self):
+            raise UnicodeDecodeError("utf-8", self.content, 12, 13, "invalid continuation byte")
+
+    def fake_post(url, **kwargs):
+        return BadResp()
+
+    monkeypatch.setattr(tr.httpx, "post", fake_post)
+    audio = tmp_path / "a.wav"
+    audio.write_bytes(b"\x00" * 8)
+    backends = [{"name": "remote", "url": "http://backend-a:9000", "api_key": ""}]
+    with pytest.raises(RuntimeError) as err:
+        tr.transcribe_file(audio, backends, "large-v3-turbo", "auto", 10)
+    msg = str(err.value)
+    assert "unreadable response" in msg
+    assert "HTTP 200" in msg
+    assert "caf" in msg  # body snippet preserved for diagnosis
+
+
+def test_transcribe_file_fails_over_past_unreadable_body(monkeypatch, tmp_path):
+    """The next backend must still be tried after an unreadable response."""
+    import subber.transcriber as tr
+
+    class BadResp:
+        status_code = 200
+        content = b'<html>proxy error</html>'
+
+        def json(self):
+            raise ValueError("Expecting value: line 1 column 1 (char 0)")
+
+    class GoodResp:
+        status_code = 200
+        text = "{}"
+
+        def json(self):
+            return {"text": "hi", "segments": [{"start": 0.0, "end": 1.0, "text": "hi"}]}
+
+    calls = []
+
+    def fake_post(url, **kwargs):
+        calls.append(url)
+        return BadResp() if "backend-a" in url else GoodResp()
+
+    monkeypatch.setattr(tr.httpx, "post", fake_post)
+    audio = tmp_path / "a.wav"
+    audio.write_bytes(b"\x00" * 8)
+    backends = [
+        {"name": "a", "url": "http://backend-a:9000", "api_key": ""},
+        {"name": "b", "url": "http://backend-b:9000", "api_key": ""},
+    ]
+    result = tr.transcribe_file(audio, backends, "large-v3-turbo", "auto", 10)
+    assert len(calls) == 2
+    assert result["segments"][0]["text"] == "hi"

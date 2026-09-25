@@ -70,6 +70,10 @@ DEFAULTS = {
         "drift_threshold_ms": 200,
         "max_concurrent": 5,
         "scan_interval_hours": 6,
+        # What the auto-scan scheduler runs when the interval elapses:
+        #   "incremental" — only files not already in the DB (new additions) [default]
+        #   "full"        — re-check the whole tree (still skips files already done)
+        "auto_scan_type": "incremental",
         "dry_run_default": True,
         "asr_fallback": False,       # transcribe audio via ASR when no subtitle exists
         "watchdog_timeout_min": 30,  # mark a file failed if stuck in_progress this long
