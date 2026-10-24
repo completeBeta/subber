@@ -82,6 +82,12 @@ MAX_TERMS = 40
 MAX_NGRAM = 3
 MIN_CUES_TO_LEARN = 20
 MAX_FAILED_RATIO = 0.05
+MIN_CASE_RATIO = 0.7
+# A single-word match can't be told apart from ordinary vocabulary: "ギルド" → "guild",
+# "ボス" → "boss", "ミス" → "mistakes" are lessons we do not want, while single-word
+# character names already arrive from the AniList cast list. So only phrases
+# ("Hellflame Dragon", "Clay Golem", "Witch Cult") are learned here.
+MIN_TARGET_WORDS = 2
 
 
 def _candidates(text: str) -> set[str]:
@@ -125,6 +131,19 @@ def _is_katakana(term: str) -> bool:
     return bool(_KATAKANA.fullmatch(term))
 
 
+def _case_ratio(target: str, all_text: str) -> float:
+    """How often the target appears capitalised, i.e. as a name.
+
+    Loanwords ("ギルド" → "guild", "スキル" → "skill") are rendered lowercase in
+    running text; names and titles ("Laila", "Witch Cult") stay capitalised
+    mid-sentence. This separates them without needing a dictionary.
+    """
+    pattern = re.escape(target)
+    capitalised = len(re.findall(rf"(?<!\w){pattern}(?!\w)", all_text))
+    any_case = len(re.findall(rf"(?<!\w){pattern}(?!\w)", all_text, re.I))
+    return capitalised / any_case if any_case else 0.0
+
+
 def mine_terms(entries: list[dict], translated: dict[int, str]) -> dict[str, dict]:
     """Return {japanese_term: {target, n, score, consistency}} for one file."""
     pairs: list[tuple[set[str], list[str]]] = []
@@ -141,6 +160,7 @@ def mine_terms(entries: list[dict], translated: dict[int, str]) -> dict[str, dic
         pairs.append((_candidates(entry["text"]), phrases))
     if len(pairs) < MIN_CUES_TO_LEARN:
         return {}
+    all_text = " ".join((translated.get(e["index"]) or "") for e in entries)
 
     # Document frequency of every phrase across the file.
     df: Counter = Counter()
@@ -232,8 +252,36 @@ def mine_terms(entries: list[dict], translated: dict[int, str]) -> dict[str, dic
                 if alt is None:
                     continue  # no safe phrase form — learn nothing
                 best = alt[1]
+            # Only proper nouns: a word that mostly appears lowercase in running
+            # text is vocabulary, not terminology ("guild", "skill", "relic").
+            if _case_ratio(best["target"], all_text) < MIN_CASE_RATIO:
+                continue
+            if len(best["target"].split()) < MIN_TARGET_WORDS:
+                continue  # single words are indistinguishable from vocabulary
             results[term] = best
-    return results
+
+    # Two candidates must not claim the same English phrase: 咆哮 ("roar") picks up
+    # "Hellflame Dragon" simply because the two appear together. Keep the term with
+    # the most evidence per target and drop the rest.
+    strongest: dict[str, tuple[str, float]] = {}
+    for term, info in results.items():
+        key = info["target"].lower()
+        weight = info["score"] * info["n"]
+        if key not in strongest or weight > strongest[key][1]:
+            strongest[key] = (term, weight)
+    keep = {term for term, _ in strongest.values()}
+    return {term: info for term, info in results.items() if term in keep}
+
+
+def is_name_fragment(term: str, names: dict[str, str]) -> bool:
+    """True when `term` is part of a known character's name (リア inside エミリア).
+
+    Nicknames are the one thing the model has no evidence for, so learning
+    "リア = Rem" would cement the mistake for every later episode.
+    """
+    return any(
+        native != term and (term in native or native in term) for native in names
+    )
 
 
 def learn(
@@ -267,13 +315,7 @@ def learn(
     names: dict[str, str] = dict(data.get("names") or {})
 
     def _is_name_fragment(term: str) -> bool:
-        """A fragment of a known character name (リア inside エミリア).
-
-        Those are nicknames, and the model's rendering of them is exactly the part
-        we have no evidence for — learning "リア = Rem" would cement the mistake
-        for every later episode, so they are skipped rather than stored.
-        """
-        return any(native != term and (term in native or native in term) for native in names)
+        return is_name_fragment(term, names)
 
     added, kept, conflicts, skipped = [], [], [], []
     # Highest-evidence first so the cap keeps the strongest terms.

@@ -40,16 +40,16 @@ def test_candidates_skip_common_words():
 
 def test_mines_a_consistently_translated_term():
     rows = _filler(20) + [
-        ("リベンジするぞ", "I'll get my Revenger."),
-        ("リベンジだ", "This is Revenger."),
-        ("リベンジを見ろ", "Watch Revenger."),
-        ("リベンジ", "Revenger!"),
+        ("リベンジするぞ", "I'll get my Revenger Blade."),
+        ("リベンジだ", "This is Revenger Blade."),
+        ("リベンジを見ろ", "Watch Revenger Blade."),
+        ("リベンジ", "Revenger Blade!"),
     ]
     entries, translated = _pairs(*rows)
     mined = term_mining.mine_terms(entries, translated)
 
     assert "リベンジ" in mined
-    assert mined["リベンジ"]["target"] == "Revenger"
+    assert mined["リベンジ"]["target"] == "Revenger Blade"
     assert mined["リベンジ"]["n"] == 4
     assert mined["リベンジ"]["score"] > 0.9
 
@@ -142,10 +142,10 @@ def test_learn_writes_terms_into_the_show_glossary(store):
     ident = show_glossary.ensure_for_identity(_ident(11))
     assert ident  # file exists before learning
     rows = _filler(20) + [
-        ("リベンジするぞ", "I'll get my Revenger."),
-        ("リベンジだ", "This is Revenger."),
-        ("リベンジを見ろ", "Watch Revenger."),
-        ("リベンジ", "Revenger!"),
+        ("リベンジするぞ", "I'll get my Revenger Blade."),
+        ("リベンジだ", "This is Revenger Blade."),
+        ("リベンジを見ろ", "Watch Revenger Blade."),
+        ("リベンジ", "Revenger Blade!"),
     ]
     entries, translated = _pairs(*rows)
 
@@ -153,27 +153,27 @@ def test_learn_writes_terms_into_the_show_glossary(store):
     assert any("リベンジ" in a for a in result["added"])
 
     data = show_glossary.load("anilist-11")
-    assert data["terms"]["リベンジ"] == "Revenger"
+    assert data["terms"]["リベンジ"] == "Revenger Blade"
     assert data["term_stats"]["リベンジ"]["n"] == 4
 
 
 def test_learn_keeps_existing_term_and_reports_conflict(store):
     show_glossary.ensure_for_identity(_ident(12))
     data = show_glossary.load("anilist-12")
-    data["terms"] = {"リア": "Lia"}
+    data["terms"] = {"魔女教": "Witch Cult"}
     show_glossary.save("anilist-12", data)
 
     rows = _filler(20) + [
-        ("リアが来た", "Rem arrived."),
-        ("リアだ", "It's Rem."),
-        ("リア", "Rem!"),
-        ("リアを見ろ", "Watch Rem."),
+        ("魔女教が来た", "The Witch Coven arrived."),
+        ("魔女教だ", "It's the Witch Coven."),
+        ("魔女教", "Witch Coven!"),
+        ("魔女教を見ろ", "Watch the Witch Coven."),
     ]
     entries, translated = _pairs(*rows)
     result = term_mining.learn("anilist-12", entries, translated, {"cues": len(rows)})
 
-    assert show_glossary.load("anilist-12")["terms"]["リア"] == "Lia"  # never overwritten
-    assert any("リア" in c for c in result["conflicts"])
+    assert show_glossary.load("anilist-12")["terms"]["魔女教"] == "Witch Cult"  # never overwritten
+    assert any("魔女教" in c for c in result["conflicts"])
 
 
 def test_learn_refuses_a_file_that_translated_badly(store):
@@ -196,10 +196,10 @@ def test_learn_caps_the_glossary(store):
     show_glossary.save("anilist-14", data)
 
     rows = _filler(20) + [
-        ("リベンジするぞ", "I'll get my Revenger."),
-        ("リベンジだ", "This is Revenger."),
-        ("リベンジを見ろ", "Watch Revenger."),
-        ("リベンジ", "Revenger!"),
+        ("リベンジするぞ", "I'll get my Revenger Blade."),
+        ("リベンジだ", "This is Revenger Blade."),
+        ("リベンジを見ろ", "Watch Revenger Blade."),
+        ("リベンジ", "Revenger Blade!"),
     ]
     entries, translated = _pairs(*rows)
     result = term_mining.learn("anilist-14", entries, translated, {"cues": len(rows)})
@@ -209,19 +209,38 @@ def test_learn_caps_the_glossary(store):
 
 def test_nickname_fragment_of_a_known_name_is_not_learned(store):
     """リア is part of エミリア — learning the model's guess would cement it."""
-    ident = _ident(16)  # seeds エミリア: Emilia
-    show_glossary.ensure_for_identity(ident)
+    names = {"エミリア": "Emilia"}
+    assert term_mining.is_name_fragment("リア", names) is True
+    assert term_mining.is_name_fragment("ペテルギウス", {"ペテルギウス・ロマネコンティ": "Petelgeuse"}) is True
+    assert term_mining.is_name_fragment("魔女教", names) is False
+
+    show_glossary.ensure_for_identity(_ident(16))  # seeds エミリア: Emilia
     rows = _filler(20) + [
-        ("リアが来た", "Rem arrived."),
-        ("リアだ", "It's Rem."),
-        ("リア", "Rem!"),
-        ("リアを見ろ", "Watch Rem."),
+        ("リアが来た", "Rem Witch arrived."),
+        ("リアだ", "It's Rem Witch."),
+        ("リア", "Rem Witch!"),
+        ("リアを見ろ", "Watch Rem Witch."),
     ]
     entries, translated = _pairs(*rows)
     result = term_mining.learn("anilist-16", entries, translated, {"cues": len(rows)})
 
     assert "リア" not in show_glossary.load("anilist-16")["terms"]
     assert any("リア" in s for s in result["skipped"])
+
+
+def test_two_candidates_cannot_claim_the_same_phrase():
+    """咆哮 ("roar") rides on "Hellflame Dragon" co-occurrence; drop the weaker one."""
+    rows = _filler(20) + [
+        ("ヘルフレイムドラゴンの咆哮", "The Hellflame Dragon's roar."),
+        ("ヘルフレイムドラゴンだ", "It's the Hellflame Dragon."),
+        ("ヘルフレイムドラゴンが来る", "The Hellflame Dragon comes."),
+        ("咆哮", "A Hellflame Dragon roar."),
+    ]
+    entries, translated = _pairs(*rows)
+    mined = term_mining.mine_terms(entries, translated)
+    targets = [v["target"].lower() for v in mined.values()]
+    assert len(targets) == len(set(targets))
+    assert mined.get("ヘルフレイムドラゴン", {}).get("target") == "Hellflame Dragon"
 
 
 def test_learn_without_key_is_a_noop(store):
@@ -254,7 +273,7 @@ def test_translation_teaches_the_show_glossary(store, tmp_path):
         for block in body.split("[")[1:]:
             num, _, rest = block.partition("]")
             if num.isdigit():
-                en = "I'll get my Revenger." if "リベンジ" in rest else "Just an ordinary line here"
+                en = "I'll get my Revenger Blade." if "リベンジ" in rest else "Just an ordinary line here"
                 out.append(f"[{num}] {en}")
         return "\n".join(out)
 
@@ -262,7 +281,7 @@ def test_translation_teaches_the_show_glossary(store, tmp_path):
         translator.translate(srt, tmp_path / "out.srt", "ja", "en")
 
     data = show_glossary.load("anilist-15")
-    assert data["terms"].get("リベンジ") == "Revenger"
+    assert data["terms"].get("リベンジ") == "Revenger Blade"
     assert translator.last_qa.get("terms_learned", 0) >= 1
 
 

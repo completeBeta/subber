@@ -346,6 +346,36 @@ async def _query_tmdb(title: str, api_key: str) -> Optional[ShowIdentity]:
 
 # ── Main identification API ────────────────────────────
 
+def _title_variants(title: str) -> list[str]:
+    """Shorter forms of a title to retry with.
+
+    Library filenames carry the whole official English title ("I May Be a Guild
+    Receptionist, But I'll Solo Any Boss to Clock Out on Time"), which AniList's
+    search does not match, while its first few words do. Without this, a show is
+    silently "unidentified" and never gets its per-show glossary.
+    """
+    words = title.replace(",", " ").split()
+    variants = []
+    for size in (8, 5, 3):
+        if len(words) > size:
+            candidate = " ".join(words[:size])
+            if candidate not in variants:
+                variants.append(candidate)
+    return variants
+
+
+async def _query_anilist_with_fallbacks(title: str):
+    """AniList lookup, retrying with progressively shorter titles."""
+    result = await _query_anilist(title)
+    if result:
+        return result
+    for candidate in _title_variants(title)[:2]:
+        result = await _query_anilist(candidate)
+        if result:
+            return result
+    return None
+
+
 async def identify(
     filepath: str | Path,
     tmdb_api_key: str = "",
@@ -375,7 +405,7 @@ async def identify(
 
     # Step 2: Try primary source
     if prefer == "anilist":
-        result = await _query_anilist(title)
+        result = await _query_anilist_with_fallbacks(title)
         if result:
             identity.source = result.source
             identity.anilist_id = result.anilist_id
@@ -404,7 +434,7 @@ async def identify(
             return identity
 
         # Fallback to AniList
-        anilist_result = await _query_anilist(title)
+        anilist_result = await _query_anilist_with_fallbacks(title)
         if anilist_result:
             identity.source = anilist_result.source
             identity.anilist_id = anilist_result.anilist_id

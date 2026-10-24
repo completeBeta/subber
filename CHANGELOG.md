@@ -2,6 +2,35 @@
 
 All notable changes to Subber are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/), and this project versions with [SemVer](https://semver.org/).
 
+## [0.11.5] - 2026-10-24
+
+### Fixed
+- **Term learning only learns phrases, never single words.** On a real episode the
+  first version stored 31 "terms" for one fantasy show — `ギルド → guild`,
+  `スキル → skill`, `クエスト → quest`, `ボス → boss`, `ミス → type`, `フフッ → Hehe` —
+  because a single katakana word cannot be told apart from ordinary vocabulary.
+  Single-word character names already arrive from the AniList cast list, so nothing
+  is lost: the same episode now learns three real terms
+  (`ヘルフレイムドラゴン → Hellflame Dragon`, `白銀 → Silver Sword`,
+  `ライセンスカード → license card`).
+- **Two candidates can no longer claim the same phrase.** `咆哮` ("roar") was paired
+  with "Hellflame Dragon" purely because the two appear together; the candidate with
+  less evidence is dropped.
+- **Identification retries AniList with shorter titles.** A library filename
+  carrying the full official title ("I May Be a Guild Receptionist, But I'll Solo
+  Any Boss to Clock Out on Time") matched nothing, so the show stayed unidentified
+  and never received a per-show glossary. The 8-word prefix matches, so real
+  library files now get their glossary instead of silently falling back.
+
+### Measured
+- Five episodes of a show with genuine Japanese subtitles ("I May Be a Guild
+  Receptionist…", 414–494 cues each), translated twice — once with no glossary, once
+  with the per-show glossary — then every cue mentioning a character compared:
+  **without the glossary 3 of 6 names were wrong and 4 extra spellings drifted across
+  the run** (`ライラ` → Laila/Lyla/Lila, `グレン` → Glenn/Glen, `ロウ` → Rou/Row);
+  **with it, 6 of 6 names matched the cast list with zero drift**
+  (`Alina` 229/229, `Laila` 33/33, `Lowe` 58/58, `Glen` 10/10, `Lululee` 85).
+
 ## [0.11.4] - 2026-10-24
 
 ### Added
