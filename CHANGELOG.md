@@ -2,6 +2,22 @@
 
 All notable changes to Subber are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/), and this project versions with [SemVer](https://semver.org/).
 
+## [0.11.3] - 2026-10-24
+
+### Added
+- **Per-show glossaries, created automatically.** Terminology is now keyed to the
+  show instead of being one global list. The first time a show is translated, the
+  app writes `config/glossary/anilist-<id>.yaml` (or `tmdb-<id>` for live action)
+  and seeds it with the AniList character list — native → romaji — so names stay
+  consistent across episodes with no input from you. Library scans already resolve
+  each file's show, so the right glossary is chosen per file; Translate-tab uploads
+  are identified from their filename (time-boxed, best effort).
+
+### Changed
+- `translation.glossary` is now a **fallback** list, used only when a file's show
+  cannot be identified. An identified show uses its own glossary exclusively, so
+  one series' names can no longer leak into another's episodes.
+
 ## [0.11.2] - 2026-10-24
 
 ### Added

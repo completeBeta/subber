@@ -927,6 +927,7 @@ async def _translate_and_sync(
     # The identify cache makes this a no-op for shows already identified during
     # the provider-search step earlier in the same scan.
     character_map = None
+    identity = None
     try:
         lib = subber_config.library_settings()
         if lib.get("use_identification", True):
@@ -937,9 +938,11 @@ async def _translate_and_sync(
                 tmdb_key = lib.get("tmdb_api_key", "")
                 prefer = lib.get("identify_prefer", "anilist")
                 ident = await identify_show(title, tmdb_api_key=tmdb_key, prefer=prefer)
+                identity = ident
                 character_map = ident.characters or None
     except Exception:
         character_map = None
+        identity = None
 
     # Detect source language from filename or content, unless the caller already
     # knows it (the ASR path passes Whisper's detected language explicitly, since
@@ -977,6 +980,17 @@ async def _translate_and_sync(
     chunk_size = ts.get("chunk_size", 20)
     max_retries = ts.get("max_retries", 3)
 
+    # Per-show terminology: use the show's own glossary when the scan identified it,
+    # and fall back to the global list only for files we couldn't identify. A known
+    # show deliberately does NOT inherit the global list — that is how one show's
+    # names used to leak into every other show.
+    from . import show_glossary
+    glossary_terms = show_glossary.terms_for(
+        identity,
+        global_terms=ts.get("glossary") or [],
+        have_names=bool(character_map),
+    )
+
     # Try backends in priority order
     last_error = None
     for backend in backends:
@@ -987,7 +1001,7 @@ async def _translate_and_sync(
                 model=backend["model"],
                 chunk_size=chunk_size,
                 max_retries=max_retries,
-                glossary=ts.get("glossary") or [],
+                glossary=glossary_terms,
                 wrap_chars=ts.get("wrap_chars", 42),
             )
 

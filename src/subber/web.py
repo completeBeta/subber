@@ -172,7 +172,7 @@ def _check_upload_size(size: int, max_mb: int | None = None) -> None:
 
 
 # ── Translator config ──
-def _get_translator():
+def _get_translator(glossary_terms=None):
     from .translator import MultiBackendTranslator
     ts = config.translation_settings()
     backends = config.translation_backends()
@@ -183,7 +183,7 @@ def _get_translator():
         chunk_size=ts.get("chunk_size", 50),
         max_retries=ts.get("max_retries", 3),
         timeout=ts.get("timeout", 120),
-        glossary=ts.get("glossary") or [],
+        glossary=ts.get("glossary") or [] if glossary_terms is None else glossary_terms,
         wrap_chars=ts.get("wrap_chars", 42),
     )
 
@@ -2013,10 +2013,42 @@ async def _run_translation(job_id: str) -> None:
             ) or "none",
         )
         _ts = config.translation_settings()
-        if _ts.get("glossary"):
-            _log.info("  Glossary: %d term(s)", len(_ts["glossary"]))
+        _lib = config.library_settings()
 
-        translator = _get_translator()
+        # Identify the show so the run gets *its* glossary, not a global list that
+        # belongs to some other series. Best-effort and time-boxed: an upload with
+        # an unresolvable name simply translates with the global fallback.
+        _identity = None
+        if _lib.get("use_identification", True) and job.source_lang not in ("en", "eng"):
+            try:
+                from .identify import identify as _identify
+                _identity = await asyncio.wait_for(
+                    _identify(
+                        job.original_name,
+                        tmdb_api_key=_lib.get("tmdb_api_key", ""),
+                        prefer=_lib.get("identify_prefer", "anilist"),
+                    ),
+                    timeout=12,
+                )
+            except Exception as _ident_err:
+                _log.info("  Show identification skipped: %s", _ident_err)
+                _identity = None
+
+        _character_map = getattr(_identity, "characters", None) or None
+        from . import show_glossary
+        _glossary_terms = show_glossary.terms_for(
+            _identity,
+            global_terms=_ts.get("glossary") or [],
+            have_names=bool(_character_map),
+        )
+        _key = show_glossary.key_for(_identity)
+        if _key:
+            _log.info("  Show: %s", show_glossary.describe(_key))
+            _log.info("  Glossary: %d term(s) for this show", len(_glossary_terms))
+        elif _glossary_terms:
+            _log.info("  Glossary: %d global term(s) (show not identified)", len(_glossary_terms))
+
+        translator = _get_translator(_glossary_terms)
 
         import pysubs2
         subs = pysubs2.load(str(input_path), encoding="utf-8-sig")
@@ -2040,6 +2072,7 @@ async def _run_translation(job_id: str) -> None:
             job.source_lang, job.target_lang,
             on_progress=on_progress,
             cancel_check=lambda: job.status == JobStatus.FAILED,
+            character_map=_character_map,
         )
         _elapsed = _time.monotonic() - _t0
         _log.info("Translation complete in %.1fs: %s", _elapsed, sanitize_log(job.original_name))

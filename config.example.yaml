@@ -11,8 +11,10 @@ translation:
   chunk_size: 50
   max_retries: 3
   timeout: 120
-  # Terminology applied verbatim by the translator ("source = target"). Use it for
-  # character names and recurring terms so every episode renders them the same way.
+  # Terminology applied verbatim by the translator ("source = target"). This is the
+  # FALLBACK list, used only when a file's show cannot be identified. Identified
+  # shows use their own glossary under config/glossary/<anilist|tmdb>-<id>.yaml,
+  # which the app creates and seeds from AniList automatically — no manual entry.
   glossary: []
   #   - リア = Lia
   #   - ペテルギウス・ロマネコンティ = Petelgeuse Romanée-Conti
