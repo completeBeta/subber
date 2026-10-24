@@ -1,4 +1,5 @@
 """Persistent configuration — YAML file, web-writable."""
+import hashlib
 import os
 from pathlib import Path
 
@@ -106,12 +107,14 @@ DEFAULTS = {
 }
 
 
-def _load() -> dict:
-    """Load config from disk, merging with defaults."""
-    if not CONFIG_PATH.exists():
-        return dict(DEFAULTS)
-    with open(CONFIG_PATH, "r") as f:
-        loaded = yaml.safe_load(f) or {}
+def _load(blob: bytes | None = None) -> dict:
+    """Load config from disk (or from an already-read blob), merging with defaults."""
+    if blob is None:
+        try:
+            blob = CONFIG_PATH.read_bytes()
+        except OSError:
+            return dict(DEFAULTS)
+    loaded = yaml.safe_load(blob.decode("utf-8")) or {}
     return _deep_merge(dict(DEFAULTS), loaded)
 
 
@@ -141,40 +144,45 @@ def _deep_merge(base: dict, overrides: dict) -> dict:
 # ── Public API ──
 
 _cache: dict | None = None
-_cache_mtime: float | None = None
+_cache_digest: str | None = None
 
 
-def _config_mtime() -> float | None:
-    """mtime of the config file, or None when it does not exist yet."""
+def _read_digest() -> tuple[bytes | None, str | None]:
+    """Config file bytes plus a content digest (None when the file is absent)."""
     try:
-        return CONFIG_PATH.stat().st_mtime
+        blob = CONFIG_PATH.read_bytes()
     except OSError:
-        return None
+        return None, None
+    return blob, hashlib.sha1(blob).hexdigest()
 
 
 def get() -> dict:
-    """Get the full config dict, reloading it if the file changed on disk.
+    """Get the full config dict, reloading it when the file's *contents* change.
 
     The cache exists so every request doesn't re-parse the YAML, but the operator
     also edits config.yaml directly (docker hosts, `vi` over SSH, ansible). A
     plain process-lifetime cache made those edits invisible until a restart: a
     model/backend switch written to the file silently kept running the old
-    backend. Comparing mtime keeps the cache cheap and makes an edit take effect
-    on the next request.
+    backend, which is exactly how a two-model comparison turned into the same
+    model twice.
+
+    The check is a content digest rather than mtime: mtime only has coarse
+    granularity on some filesystems, so two saves inside the same tick would be
+    missed. The file is ~2 KB, so reading it per call is cheaper than the bug.
     """
-    global _cache, _cache_mtime
-    disk_mtime = _config_mtime()
-    if _cache is None or (disk_mtime is not None and disk_mtime != _cache_mtime):
-        _cache = _load()
-        _cache_mtime = disk_mtime
+    global _cache, _cache_digest
+    blob, digest = _read_digest()
+    if _cache is None or digest != _cache_digest:
+        _cache = _load(blob)
+        _cache_digest = digest
     return _cache
 
 
 def reload() -> dict:
     """Force reload from disk."""
-    global _cache, _cache_mtime
+    global _cache, _cache_digest
     _cache = None
-    _cache_mtime = None
+    _cache_digest = None
     return get()
 
 
@@ -198,7 +206,7 @@ def update(section: str, values: dict) -> dict:
     cfg[section].update(values)
     _save(cfg)
     _cache = cfg
-    _cache_mtime = _config_mtime()
+    _cache_digest = _read_digest()[1]
     return cfg[section]
 
 

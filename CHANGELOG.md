@@ -2,6 +2,25 @@
 
 All notable changes to Subber are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/), and this project versions with [SemVer](https://semver.org/).
 
+## [0.11.1] - 2026-10-24
+
+### Added
+- **Search results say what they are.** Each row now shows a readable show name
+  plus a chip for what the file covers — `S01E04`, `Season 1 pack`,
+  `S03 pack · E01–E13`, `Special 5`, `Full feature` — derived from the provider's
+  filename and release name. Rows are split into **Single episodes** and
+  **Season packs** when a search returns both, episodes sorted by season/episode.
+
+### Fixed
+- **Search result rows no longer overlap.** The raw release name is clamped to two
+  lines with break-anywhere wrapping, the text column is allowed to shrink
+  (`min-width: 0`), and the Download button keeps its own space — verified at
+  1200 px and 390 px with no overlapping or overflowing boxes.
+- Release-name parsing: a trailing tag after the episode (`…-01[Crunchyroll]`) no
+  longer hides the episode, a hyphenated title word is no longer eaten as a
+  release group, `Episode 1 ~ 13` ranges are recognised as packs, and
+  folder-style names fall back to the show name rather than the folder path.
+
 ## [0.11.0] - 2026-10-24
 
 ### Added

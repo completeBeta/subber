@@ -23,6 +23,7 @@ import logging
 import logging.handlers
 _log = logging.getLogger("subber")
 from .rate_limit import RateLimitMiddleware
+from .release_name import describe_release, short_label
 from .logsanitize import sanitize_log
 from .types import BatchJob, JobStatus, TranslationJob
 
@@ -1064,8 +1065,12 @@ async def api_search(
             video_path=Path(video_path) if video_path else None,
         )
 
-        formatted = [
-            {
+        formatted = []
+        for r in results[:30]:
+            # Providers hand back raw scene filenames; derive a readable show name,
+            # the season/episode it covers, and whether it is a whole-season pack.
+            info = describe_release(r.filename, r.release_info)
+            formatted.append({
                 "id": r.id,
                 "filename": r.filename,
                 "language": r.language,
@@ -1074,16 +1079,32 @@ async def api_search(
                 "rating": r.rating,
                 "hearing_impaired": r.hearing_impaired,
                 "release_info": r.release_info,
+                "show": info["show"],
+                "season": info["season"],
+                "episode": info["episode"],
+                "episodes": info["episodes"],
+                "is_pack": info["is_pack"],
+                "quality": info["quality"],
+                "label": short_label(info),
                 # metadata lets the download endpoint re-invoke the provider
                 # statelessly (video_path stripped — internal path)
                 "metadata": {k: v for k, v in (r.metadata or {}).items() if k != "video_path"},
-            }
-            for r in results[:30]
-        ]
+            })
+
+        # Single episodes first (in season/episode order), season packs last; inside
+        # each group the most-downloaded release wins the top slot.
+        formatted.sort(key=lambda x: (
+            1 if x["is_pack"] else 0,
+            x["season"] or 0,
+            x["episode"] or 0,
+            -(x["downloads"] or 0),
+        ))
 
         return {
             "results": formatted,
             "total": len(results),
+            "episode_count": sum(1 for x in formatted if not x["is_pack"]),
+            "pack_count": sum(1 for x in formatted if x["is_pack"]),
             "providers_searched": registry.names,
         }
     except Exception as e:

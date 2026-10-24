@@ -75,24 +75,54 @@ async function doSearch() {
         }
 
         lastResults = data.results;
-        resultsDiv.innerHTML = '<p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.75rem;">' +
-            data.results.length + ' result(s) · Providers: ' + (data.providers_searched || []).join(', ') + '</p>' +
-            data.results.map((r, i) => `
+
+        const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => (
+            {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]
+        ));
+
+        // One row: readable show name, a chip for the episode/pack, provider
+        // facts, then the raw release name (clamped, never allowed to overlap).
+        const rowHtml = (r, i) => {
+            const badges = [];
+            if (r.label) badges.push(
+                `<span class="badge ${r.is_pack ? 'badge-pack' : 'badge-ep'}">${esc(r.label)}</span>`);
+            badges.push(`<span class="badge">${esc((r.language || '?').toUpperCase())}</span>`);
+            if (r.provider) badges.push(`<span class="badge">${esc(r.provider)}</span>`);
+            if (r.quality) badges.push(`<span class="badge">${esc(r.quality)}</span>`);
+            if (r.downloads) badges.push(`<span class="badge">${Number(r.downloads).toLocaleString()} downloads</span>`);
+            if (r.rating) badges.push(`<span class="badge">★ ${Number(r.rating).toFixed(1)}</span>`);
+            if (r.hearing_impaired) badges.push('<span class="badge">HI</span>');
+            const raw = (r.release_info && r.release_info !== r.filename)
+                ? `${r.filename} · ${r.release_info}` : (r.filename || '');
+            return `
             <div class="result-item">
-                <div style="min-width: 0; flex: 1;">
-                    <div class="result-filename" title="${r.filename}">${r.filename}</div>
-                    <div class="meta">
-                        [${r.language}] · ${r.provider || '?'} · ${(r.downloads || 0).toLocaleString()} downloads · Rating: ${(r.rating || 0).toFixed(1)}
-                        ${r.hearing_impaired ? ' · HI' : ''}
-                        ${r.release_info ? ' · ' + r.release_info : ''}
-                    </div>
+                <div class="result-main">
+                    <div class="result-title" title="${esc(r.show || r.filename || '')}">${esc(r.show || r.filename || 'Unknown')}</div>
+                    <div class="result-badges">${badges.join('')}</div>
+                    <div class="result-source" title="${esc(raw)}">${esc(raw)}</div>
                 </div>
-                <button class="btn-save" style="font-size: 0.8rem; padding: 0.4rem 0.8rem; flex-shrink: 0;"
-                    onclick="downloadSub(${i}, this)">
-                    Download
-                </button>
-            </div>
-        `).join('');
+                <button class="btn-save" onclick="downloadSub(${i}, this)">Download</button>
+            </div>`;
+        };
+
+        const episodes = data.results.filter(r => !r.is_pack);
+        const packs = data.results.filter(r => r.is_pack);
+        const split = episodes.length > 0 && packs.length > 0;
+
+        let html = `<p class="result-count">${data.results.length} result(s) · Providers: ` +
+            `${esc((data.providers_searched || []).join(', '))}` +
+            (split ? ` · ${episodes.length} episode${episodes.length === 1 ? '' : 's'}, ` +
+                     `${packs.length} pack${packs.length === 1 ? '' : 's'}` : '') + `</p>`;
+
+        if (episodes.length) {
+            if (split) html += `<h3 class="result-group">Single episodes <span>${episodes.length}</span></h3>`;
+            html += episodes.map(r => rowHtml(r, lastResults.indexOf(r))).join('');
+        }
+        if (packs.length) {
+            if (split) html += `<h3 class="result-group">Season packs <span>${packs.length}</span></h3>`;
+            html += packs.map(r => rowHtml(r, lastResults.indexOf(r))).join('');
+        }
+        resultsDiv.innerHTML = html;
     } catch (e) {
         resultsDiv.innerHTML = '<span style="color: var(--error)">✗ ' + e.message + '</span>';
     }
