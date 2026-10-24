@@ -146,6 +146,12 @@ Upload `.srt`, `.ass`, `.vtt`, or `.zip` subtitle files and translate them betwe
 - **Download Translated File** — save the result
 - **Recent Translations** — history of past jobs with progress; **Clear History** wipes it
 
+**Output behaviour:**
+- Cues are word-wrapped at `translation.wrap_chars` characters (default 42, `0` turns wrapping off); existing line breaks are kept.
+- Each cue is checked against the response it came from — if the model merged, dropped or duplicated a line, that chunk is retried at temperature 0 and any remaining lines are translated individually, so dialogue can't shift onto the next speaker.
+- `translation.glossary` injects a per-show terminology list (`リア = Lia`) so names and recurring terms render identically across episodes.
+- The Logs tab records the effective backend chain for every run (`Backend chain: Name (model) -> …`), so you can confirm which model actually translated a file.
+
 ### 🔍 Search
 Search all enabled providers by show name or video path, and download a specific subtitle from the results.
 

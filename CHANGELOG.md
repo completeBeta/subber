@@ -2,6 +2,49 @@
 
 All notable changes to Subber are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/), and this project versions with [SemVer](https://semver.org/).
 
+## [0.11.0] - 2026-10-24
+
+### Added
+- **Per-show terminology (glossary)** — `translation.glossary`, a list of
+  `"source = target"` entries injected into the translation prompt, so names and
+  terms come out the same way in every episode (`リア = Lia`,
+  `ペテルギウス・ロマネコンティ = Petelgeuse Romanée-Conti`). Verified against
+  Hy-MT2, which applies a listed term verbatim; anything left off the list is still
+  guessed by the model, so keep the list complete.
+- **Subtitle line wrapping** — `translation.wrap_chars` (default 42, `0` disables):
+  translated cues are word-wrapped when written, instead of being emitted as one
+  overlong line. Existing hard breaks (`\N`) are preserved.
+- **The effective backend chain is logged on every translation**
+  (`Backend chain: Name (model) -> ...`), plus the glossary size when configured, so
+  "which model actually ran" is answerable from the log alone.
+
+### Fixed
+- **A model/backend switch written to `config.yaml` now takes effect without a
+  restart.** `config.get()` cached the file for the lifetime of the process and only
+  a save through the UI refreshed it, so editing the YAML directly kept running the
+  previous backend — a two-model comparison could silently be the same model twice.
+- **Dialogue no longer disappears when a model puts the speaker label on its own
+  response line.** `[0] (Felix Argyle)` followed by the translation on the next line
+  used to keep only the label; un-numbered continuation lines are now appended to
+  the previous cue (4-7 cues per episode depending on the model).
+- **A chunk whose response doesn't carry exactly the cues that were sent is now
+  retried** — once at temperature 0, then the remaining lines one at a time.
+  Previously a merged or dropped line shifted every following cue in the file
+  (observed 1-15 cue desyncs, with dialogue landing on the wrong speaker). A chunk
+  whose speaker labels no longer line up with the source — the tell-tale of a
+  merge-plus-duplicate that keeps the line count intact — is retried the same way,
+  and any window that still comes back drifted is re-translated one line at a time
+  (a single-line request cannot merge), then written only if its label now matches.
+  The 3 overlap cues each chunk re-sends for context are now context only: the later
+  chunk no longer writes its out-of-context version over the line the previous
+  chunk already translated.
+- **The Translate tab no longer freezes the app while it works.** The synchronous
+  translation ran inside the request's event loop, so every other endpoint
+  (`/api/health`, job polling for the progress bar, Cancel) was blocked until the
+  last chunk finished — a 388-cue episode made the UI unresponsive for ~60 s and the
+  upload request itself only returned at the end. Translation now runs in a worker
+  thread, so progress and Cancel behave live.
+
 ## [0.10.0] - 2026-09-25
 
 ### Added

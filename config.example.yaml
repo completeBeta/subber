@@ -11,6 +11,14 @@ translation:
   chunk_size: 50
   max_retries: 3
   timeout: 120
+  # Terminology applied verbatim by the translator ("source = target"). Use it for
+  # character names and recurring terms so every episode renders them the same way.
+  glossary: []
+  #   - リア = Lia
+  #   - ペテルギウス・ロマネコンティ = Petelgeuse Romanée-Conti
+  #   - 魔女教 = Witch Cult
+  # Wrap translated cues at this many characters (0 disables wrapping).
+  wrap_chars: 42
   backends:
     # Provider-agnostic: `name` is a free-form label; the actual model is
     # determined by `api_base` + `model`. Any OpenAI-compatible API works.

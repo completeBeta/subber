@@ -38,7 +38,7 @@ def test_translate_injects_character_names(tmp_path):
     t = Translator(api_key="x", model="m", chunk_size=50)
     captured = {}
 
-    def fake_call_api(messages):
+    def fake_call_api(messages, *_args, **_kwargs):
         captured["system"] = messages[0]["content"]
         return "[0] Hello, Kobato"
 
@@ -62,7 +62,7 @@ def test_translate_no_character_map_no_injection(tmp_path):
     t = Translator(api_key="x", model="m", chunk_size=50)
     captured = {}
 
-    def fake_call_api(messages):
+    def fake_call_api(messages, *_args, **_kwargs):
         captured["system"] = messages[0]["content"]
         return "[0] Hello"
 

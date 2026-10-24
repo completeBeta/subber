@@ -32,19 +32,27 @@ def _texts(path):
 
 
 def test_translate_retries_omitted_lines(tmp_path):
+    """A chunk that comes back short is retried instead of being accepted."""
     src = tmp_path / "in.srt"
     _write_srt(src, ["こんにちは", "さようなら", "ありがとう"])
     out = tmp_path / "out.srt"
 
     t = Translator(api_key="x", model="m", chunk_size=50)
     responses = iter([
-        "[0] Hello\n[2] Thank you",   # main pass omits [1]
-        "[1] Goodbye",                # retry pass
+        "[0] Hello\n[2] Thank you",              # main pass omits [1]
+        "[0] Hello\n[1] Goodbye\n[2] Thank you",  # retry pass (temp 0)
     ])
-    with mock.patch.object(t, "_translate_chunk", side_effect=lambda *a, **k: next(responses)):
+    calls = []
+
+    def fake_chunk(*a, **k):
+        calls.append(k.get("temperature"))
+        return next(responses)
+
+    with mock.patch.object(t, "_translate_chunk", side_effect=fake_chunk):
         t.translate(src, out, "ja", "en")
 
     assert _texts(out) == ["Hello", "Goodbye", "Thank you"]
+    assert calls == [None, 0.0]  # first attempt, then one deterministic retry
 
 
 def test_translate_retries_passthrough_cjk(tmp_path):

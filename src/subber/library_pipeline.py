@@ -987,6 +987,8 @@ async def _translate_and_sync(
                 model=backend["model"],
                 chunk_size=chunk_size,
                 max_retries=max_retries,
+                glossary=ts.get("glossary") or [],
+                wrap_chars=ts.get("wrap_chars", 42),
             )
 
             def _do_translate():

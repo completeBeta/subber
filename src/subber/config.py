@@ -20,6 +20,8 @@ DEFAULTS = {
         "max_retries": 3,
         "timeout": 120,
         "backends": [],  # list of {name, api_base, api_key, model, priority}
+        "glossary": [],  # ["source = target", ...] terminology injected into the prompt
+        "wrap_chars": 42,  # subtitle line width in characters; 0 disables wrapping
     },
     "sync": {
         "engine": "ffsubsync",
@@ -139,20 +141,40 @@ def _deep_merge(base: dict, overrides: dict) -> dict:
 # ── Public API ──
 
 _cache: dict | None = None
+_cache_mtime: float | None = None
+
+
+def _config_mtime() -> float | None:
+    """mtime of the config file, or None when it does not exist yet."""
+    try:
+        return CONFIG_PATH.stat().st_mtime
+    except OSError:
+        return None
 
 
 def get() -> dict:
-    """Get the full config dict (cached)."""
-    global _cache
-    if _cache is None:
+    """Get the full config dict, reloading it if the file changed on disk.
+
+    The cache exists so every request doesn't re-parse the YAML, but the operator
+    also edits config.yaml directly (docker hosts, `vi` over SSH, ansible). A
+    plain process-lifetime cache made those edits invisible until a restart: a
+    model/backend switch written to the file silently kept running the old
+    backend. Comparing mtime keeps the cache cheap and makes an edit take effect
+    on the next request.
+    """
+    global _cache, _cache_mtime
+    disk_mtime = _config_mtime()
+    if _cache is None or (disk_mtime is not None and disk_mtime != _cache_mtime):
         _cache = _load()
+        _cache_mtime = disk_mtime
     return _cache
 
 
 def reload() -> dict:
     """Force reload from disk."""
-    global _cache
+    global _cache, _cache_mtime
     _cache = None
+    _cache_mtime = None
     return get()
 
 
@@ -176,6 +198,7 @@ def update(section: str, values: dict) -> dict:
     cfg[section].update(values)
     _save(cfg)
     _cache = cfg
+    _cache_mtime = _config_mtime()
     return cfg[section]
 
 

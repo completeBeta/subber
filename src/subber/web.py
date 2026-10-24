@@ -182,6 +182,8 @@ def _get_translator():
         chunk_size=ts.get("chunk_size", 50),
         max_retries=ts.get("max_retries", 3),
         timeout=ts.get("timeout", 120),
+        glossary=ts.get("glossary") or [],
+        wrap_chars=ts.get("wrap_chars", 42),
     )
 
 
@@ -1243,6 +1245,8 @@ async def _run_grab_pipeline(
                 chunk_size=ts.get("chunk_size", 50),
                 max_retries=ts.get("max_retries", 3),
                 timeout=ts.get("timeout", 120),
+                glossary=ts.get("glossary") or [],
+                wrap_chars=ts.get("wrap_chars", 42),
                 character_map=character_map,
             )
             # Inject model info into subtitle file header
@@ -1975,6 +1979,20 @@ async def _run_translation(job_id: str) -> None:
 
         _log.info("Starting translation: %s (%s -> %s)", sanitize_log(job.original_name), job.source_lang, job.target_lang)
 
+        # Log the effective backend chain every run: the file on disk can disagree
+        # with what a running process has loaded, and "which model actually ran"
+        # has to be answerable from the log alone.
+        _chain = config.translation_backends()
+        _log.info(
+            "  Backend chain: %s",
+            " -> ".join(
+                f"{b.get('name', '?')} ({b.get('model', '?')})" for b in _chain
+            ) or "none",
+        )
+        _ts = config.translation_settings()
+        if _ts.get("glossary"):
+            _log.info("  Glossary: %d term(s)", len(_ts["glossary"]))
+
         translator = _get_translator()
 
         import pysubs2
@@ -1989,7 +2007,12 @@ async def _run_translation(job_id: str) -> None:
             job.total_chunks = total
             _log.info("  Chunk %d/%d", chunk, total)
 
-        translator.translate(
+        # Translate off the event loop. translator.translate() is synchronous
+        # (blocking httpx calls per chunk), so awaiting it inline froze the whole
+        # app for the length of the job: /api/health, /api/jobs (progress polling)
+        # and the Cancel button were all unreachable until the last chunk landed.
+        await asyncio.to_thread(
+            translator.translate,
             input_path, output_path,
             job.source_lang, job.target_lang,
             on_progress=on_progress,

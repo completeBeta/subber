@@ -86,6 +86,8 @@ class Translator:
         max_tokens: int = 4096,
         max_retries: int = 3,
         timeout: float = 120.0,
+        glossary: list | None = None,
+        wrap_chars: int = 42,
     ):
         self.api_base = api_base.rstrip("/")
         self.api_key = api_key
@@ -96,6 +98,10 @@ class Translator:
         self.max_tokens = max_tokens
         self.max_retries = max_retries
         self.timeout = timeout
+        # Terminology table (["source = target", ...]) injected into the prompt.
+        self.glossary = glossary or []
+        # Subtitle line wrapping applied when the translation is written back.
+        self.wrap_chars = int(wrap_chars or 0)
 
     def translate(
         self,
@@ -124,6 +130,7 @@ class Translator:
         Returns the output path on success.
         """
         self._character_context = _format_character_map(character_map)
+        self._glossary_context = _format_glossary(self.glossary)
         subs = pysubs2.load(str(input_path), encoding="utf-8-sig")
         entries = [
             {"index": i, "text": event.plaintext, "start": event.start, "end": event.end}
@@ -135,6 +142,7 @@ class Translator:
 
         chunks = _chunk_entries(entries, self.chunk_size, self.chunk_overlap)
         translated: dict[int, str] = {}
+        repairs = 0
 
         for ci, chunk in enumerate(chunks):
             if cancel_check and cancel_check():
@@ -142,17 +150,33 @@ class Translator:
             if on_progress:
                 on_progress(ci + 1, len(chunks))
 
-            chunk_text = self._translate_chunk(chunk, source_lang, target_lang)
-            parsed = _parse_numbered_response(chunk_text)
-
-            # Detect refusal: if model refused (e.g. safety filter), retry once with
-            # a preamble clarifying these are fictional anime subtitles.
-            if not parsed:
-                chunk_text = self._translate_chunk(chunk, source_lang, target_lang, retry_refusal=True)
-                parsed = _parse_numbered_response(chunk_text)
+            parsed, repaired = self._translate_chunk_verified(chunk, source_lang, target_lang)
+            if repaired:
+                repairs += 1
+                import logging
+                logging.getLogger("subber").warning(
+                    "  Chunk %d/%d repaired: model returned a line count that did not "
+                    "match %d sent cues (merged/dropped/duplicated lines)",
+                    ci + 1, len(chunks), len(chunk),
+                )
 
             for idx, text in parsed.items():
                 translated[idx] = text
+
+        # Last line of defence against a merge that preserved the line count: the
+        # speaker labels tell us where the content really belongs, so re-translate
+        # the cues around a label drift one line at a time (a single-line request
+        # has nothing to merge with).
+        repaired_cues = self._repair_label_desync(
+            entries, translated, source_lang, target_lang
+        )
+        if repaired_cues:
+            import logging
+            logging.getLogger("subber").warning(
+                "  Repaired %d cue(s) whose speaker labels did not line up with the "
+                "source (model merged two cues and shifted the rest)",
+                repaired_cues,
+            )
 
         # Retry any entries still in the source language — the LLM can omit line
         # numbers (duplicate/hallucinated segments) or pass source text straight
@@ -180,10 +204,80 @@ class Translator:
                 # Set event.text directly so ASS formatting tags and \N are preserved.
                 # pysubs2 will handle format-specific newline encoding (literal \n for
                 # SRT, \N escape for ASS) based on the output format.
-                event.text = translated[i]
+                event.text = _wrap_subtitle(translated[i], self.wrap_chars)
 
         subs.save(str(output_path))
         return output_path
+
+    def _repair_label_desync(
+        self,
+        entries: list[dict],
+        translated: dict[int, str],
+        source_lang: str,
+        target_lang: str,
+    ) -> int:
+        """Re-translate cues whose speaker label ended up on the wrong line.
+
+        Models occasionally translate a sentence that spans two cues as one line and
+        then duplicate or split another line so the response length still matches —
+        the chunk passes every count check while the content is one cue out of step
+        from the merge point onwards. Speaker labels are the only anchors available
+        without a reference translation, so any cue whose label presence disagrees
+        with the source marks a window that is re-translated one line at a time.
+
+        Returns the number of cues replaced.
+        """
+        has_labels = any(_JP_LABEL_RE.match(e["text"].strip()) for e in entries)
+        if not has_labels:
+            return 0
+
+        bad = [
+            e["index"]
+            for e in entries
+            if e["index"] in translated
+            and bool(_JP_LABEL_RE.match(e["text"].strip()))
+            != bool(_EN_LABEL_RE.match((translated[e["index"]] or "").strip()))
+        ]
+        if not bad:
+            return 0
+
+        windows: list[list[int]] = []
+        cur = [bad[0]]
+        for i in bad[1:]:
+            if i - cur[-1] <= 3:
+                cur.append(i)
+            else:
+                windows.append(cur)
+                cur = [i]
+        windows.append(cur)
+
+        by_index = {e["index"]: e for e in entries}
+        fixed = 0
+        for window in windows:
+            lo = max(0, window[0] - 2)
+            hi = min(len(entries) - 1, window[-1] + 2)
+            for i in range(lo, hi + 1):
+                e = by_index.get(i)
+                if e is None:
+                    continue
+                try:
+                    raw = self._translate_chunk(
+                        [e], source_lang, target_lang, temperature=0.0
+                    )
+                    got = _parse_numbered_response(raw)
+                    text = (got.get(i) or next(iter(got.values()), "")).strip()
+                except Exception:
+                    continue
+                if not text:
+                    continue
+                # Only keep it when the label situation now matches the source.
+                if bool(_JP_LABEL_RE.match(e["text"].strip())) == bool(
+                    _EN_LABEL_RE.match(text)
+                ):
+                    translated[i] = text
+                    fixed += 1
+
+        return fixed
 
     def _translate_chunk(
         self,
@@ -191,6 +285,7 @@ class Translator:
         source_lang: str,
         target_lang: str,
         retry_refusal: bool = False,
+        temperature: float | None = None,
     ) -> str:
         """Send one chunk to the LLM and return the raw response text."""
         numbered_lines = "\n".join(
@@ -202,18 +297,22 @@ class Translator:
         target_name = _LANG_NAMES.get(target_lang, target_lang.upper())
         char_ctx = getattr(self, "_character_context", "") or ""
         char_block = f"{char_ctx}\n" if char_ctx else ""
+        glossary_ctx = getattr(self, "_glossary_context", "") or ""
+        glossary_block = f"{glossary_ctx}\n\n" if glossary_ctx else ""
         system_prompt = (
             f"{preamble}"
             f"You are a professional {lang_name} ({source_lang}) to {target_name} ({target_lang}) translator. "
             f"Your goal is to accurately convey the meaning and nuances of the original {lang_name} text "
             f"while adhering to {target_name} grammar, vocabulary, and cultural sensitivities.\n\n"
             f"{char_block}"
+            f"{glossary_block}"
             f"Translate these numbered subtitle lines from {source_lang} to {target_lang}.\n\n"
             f"Rules:\n"
             f"- Preserve meaning, tone, and character names\n"
             f"- Keep lines concise (subtitle-friendly length)\n"
             f"- Preserve any line break markers (\\\\N) at natural positions\n"
             f"- Preserve the original line numbers exactly as shown\n"
+            f"- Return exactly one line per number, never merge or skip a number\n"
             f"- Return ONLY the translated lines with their numbers\n"
             f"- Format: [N] translated text (keep original numbers)\n"
             f"- Produce only the translation, without any additional explanations"
@@ -224,10 +323,68 @@ class Translator:
             {"role": "user", "content": numbered_lines},
         ]
 
-        return self._call_api(messages)
+        return self._call_api(messages, temperature)
 
-    def _call_api(self, messages: list[dict]) -> str:
+    def _translate_chunk_verified(
+        self,
+        chunk: list[dict],
+        source_lang: str,
+        target_lang: str,
+    ) -> tuple[dict[int, str], bool]:
+        """Translate one chunk and guarantee a line for every cue index it sent.
+
+        A model that merges two cues into one line, drops a line or repeats a
+        number collapses the 1:1 index mapping, and every later cue in that chunk
+        is then shifted (observed as 1-15 cue desyncs that survive into the final
+        file). Any chunk whose response does not carry exactly the indices we
+        sent is retried once at temperature 0, then the stragglers are translated
+        one line at a time — a single-line request cannot desync.
+
+        Returns (translations, repaired) where `repaired` is True when the first
+        response was unusable and a retry / per-line pass was needed.
+        """
+        # Overlap cues were already translated as part of the previous chunk; they
+        # are sent as context only. Letting the later chunk write them back would
+        # overwrite a good line with one translated out of context.
+        wanted = [e for e in chunk if e.get("_translate", True)]
+        sent = {e["index"] for e in chunk}
+        expected = [e["index"] for e in wanted]
+
+        parsed: dict[int, str] = {}
+        repaired = False
+        for attempt, temp in enumerate((None, 0.0)):
+            raw = self._translate_chunk(
+                chunk, source_lang, target_lang,
+                retry_refusal=attempt > 0,
+                temperature=temp,
+            )
+            got = _parse_numbered_response(raw)
+            parsed = {i: t for i, t in got.items() if i in set(expected) and t.strip()}
+            missing = [i for i in expected if i not in parsed]
+            extra = set(got) - sent
+            if not missing and not extra and _labels_mismatch(wanted, parsed) == 0:
+                return parsed, repaired
+            repaired = True
+
+        for e in wanted:
+            if e["index"] in parsed:
+                continue
+            try:
+                raw = self._translate_chunk(
+                    [e], source_lang, target_lang, temperature=0.0
+                )
+                got = _parse_numbered_response(raw)
+                text = got.get(e["index"]) or next(iter(got.values()), "")
+                if text and text.strip():
+                    parsed[e["index"]] = text.strip()
+            except Exception:
+                continue  # keep whatever the chunk pass produced
+
+        return parsed, repaired
+
+    def _call_api(self, messages: list[dict], temperature: float | None = None) -> str:
         """Call the LLM API with retry logic."""
+        temp = self.temperature if temperature is None else temperature
         # Detect translategemma models — they need the completion API, not chat
         is_translategemma = "translategemma" in self.model.lower()
         if is_translategemma:
@@ -243,7 +400,7 @@ class Translator:
             payload = {
                 "model": self.model,
                 "prompt": prompt,
-                "temperature": self.temperature,
+                "temperature": temp,
                 "max_tokens": self.max_tokens,
             }
         else:
@@ -255,7 +412,7 @@ class Translator:
             payload = {
                 "model": self.model,
                 "messages": messages,
-                "temperature": self.temperature,
+                "temperature": temp,
                 "max_tokens": self.max_tokens,
             }
 
@@ -451,43 +608,158 @@ def _chunk_entries(
 ) -> list[list[dict]]:
     """Split entries into overlapping chunks for translation."""
     if len(entries) <= chunk_size:
-        return [entries]
+        return [[dict(e, _translate=True) for e in entries]]
 
     chunks = []
     i = 0
     while i < len(entries):
         # Take chunk_size entries, but include 'overlap' from previous chunk for context
         start = max(0, i - overlap) if i > 0 else i
-        chunk = entries[start : i + chunk_size]
-        # Mark which entries are new in this chunk (not context-only)
-        for e in chunk:
-            e["_translate"] = e["index"] >= i
+        # Copy each entry: the same cue is context-only in one chunk and new in the
+        # previous one, so the flag has to live on the chunk's copy, not the cue.
+        chunk = [
+            dict(e, _translate=e["index"] >= i)
+            for e in entries[start : i + chunk_size]
+        ]
         chunks.append(chunk)
         i += chunk_size
 
     return chunks
 
 
-def _parse_numbered_response(text: str) -> dict[int, str]:
-    """Parse LLM response like '[0] Hello\n[1] World' into a dict."""
-    import re
+_NUMBERED_LINE_RE = re.compile(r"^\[(\d+)\]\s*(.*)")
+# Lines a model sometimes appends after the translation ("Note: ...", "Here is ...").
+_META_TAIL_RE = re.compile(r"^(note|notes?|explanation|here (?:is|are)|translation|output)\b", re.I)
 
-    result: dict[int, str] = {}
-    pattern = re.compile(r"\[(\d+)\]\s*(.*)")
 
-    for line in text.strip().split("\n"):
-        line = line.strip()
-        if not line:
+# Speaker labels in the source (SDH cues: "（スバル） ...") and in the response.
+_JP_LABEL_RE = re.compile(r"^[（(]([^）)]{1,16})[）)]")
+_EN_LABEL_RE = re.compile(r"^\(([^)]{1,40})\)")
+
+
+def _labels_mismatch(chunk: list[dict], parsed: dict[int, str]) -> int:
+    """Count cues where the speaker-label presence disagrees with the source.
+
+    A compensating merge — two cues translated as one line, then another line
+    duplicated to keep the count — leaves the response length correct while the
+    content is one cue out of step. Text similarity can't separate that from two
+    genuinely similar lines, but the speaker labels can: in an SDH file every
+    labelled source cue must come back with a label at the same index, and an
+    unlabelled one must not sprout one. A shift breaks that on either side of the
+    merge point.
+    """
+    bad = 0
+    for e in chunk:
+        if not e.get("_translate", True):
             continue
-        match = pattern.match(line)
-        if match:
-            idx = int(match.group(1))
-            translated = match.group(2)
-            # Strip any trailing quotes or formatting the LLM might add
-            translated = translated.strip('"').strip("'")
-            result[idx] = translated
+        text = parsed.get(e["index"])
+        if text is None:
+            continue
+        if bool(_JP_LABEL_RE.match(e["text"].strip())) != bool(_EN_LABEL_RE.match(text.strip())):
+            bad += 1
+    return bad
+# Accepted separators in a glossary entry: "リア = Lia", "リア->Lia", "リア\tLia".
+_GLOSSARY_SEPARATORS = (" = ", "=", " -> ", "->", "\t")
 
-    return result
+
+def _format_glossary(glossary) -> str:
+    """Build the terminology block injected into the translation prompt.
+
+    Entries are "source = target" strings or {"source", "target"} dicts. The block
+    is applied verbatim by the model — Hy-MT2 in particular follows it closely and
+    then degrades anything *not* listed, so entries are emitted only when present.
+    """
+    if not glossary:
+        return ""
+    lines: list[str] = []
+    for entry in glossary:
+        if isinstance(entry, dict):
+            src = str(entry.get("source") or entry.get("term") or "").strip()
+            dst = str(entry.get("target") or entry.get("translation") or "").strip()
+        else:
+            raw = str(entry)
+            src = dst = ""
+            for sep in _GLOSSARY_SEPARATORS:
+                if sep in raw:
+                    left, _, right = raw.partition(sep)
+                    src, dst = left.strip(), right.strip()
+                    break
+        if src and dst:
+            lines.append(f"- {src} = {dst}")
+    if not lines:
+        return ""
+    return (
+        "Terminology — use these exact renderings; do not translate or alter the "
+        "target spelling:\n" + "\n".join(lines)
+    )
+
+
+def _wrap_line(text: str, width: int) -> list[str]:
+    """Greedy word wrap of one line to `width` characters."""
+    words = text.split()
+    if not words:
+        return [""]
+    lines: list[str] = []
+    cur = ""
+    for word in words:
+        if not cur:
+            cur = word
+        elif len(cur) + 1 + len(word) <= width:
+            cur = f"{cur} {word}"
+        else:
+            lines.append(cur)
+            cur = word
+    if cur:
+        lines.append(cur)
+    return lines
+
+
+def _wrap_subtitle(text: str, width: int = 42) -> str:
+    """Wrap translated subtitle text so no line runs off the screen.
+
+    Existing hard breaks (SRT newline or ASS \\N) are respected — each segment is
+    wrapped on its own. Text that needs three lines gets three lines rather than a
+    merged overlong one or a truncated one. width < 10 disables wrapping (0 = off).
+    """
+    if not text or not width or width < 10:
+        return text
+    out: list[str] = []
+    for segment in re.split(r"\\N|\n", text):
+        out.extend(_wrap_line(segment, width))
+    return "\n".join(out)
+
+
+def _parse_numbered_response(text: str) -> dict[int, str]:
+    """Parse an LLM response like '[0] Hello\\n[1] World' into a dict.
+
+    Models do not reliably keep one cue on one line. The common failure is an SDH
+    speaker label alone on a line with the dialogue on the next:
+
+        [0] (Felix Argyle)
+        Showing up late to join us now—
+
+    A strict '[N]' matcher discards that dialogue, which is how a finished file
+    ends up carrying a bare "(Felix Argyle)" with no text. Un-numbered lines are
+    therefore appended to the previous cue. Lines that look like model commentary
+    ("Note: ...") are skipped instead of being glued on.
+    """
+    result: dict[int, str] = {}
+    current: int | None = None
+
+    for raw_line in text.strip().split("\n"):
+        line = raw_line.strip()
+        if not line or line.startswith("```"):
+            continue
+        match = _NUMBERED_LINE_RE.match(line)
+        if match:
+            current = int(match.group(1))
+            result[current] = match.group(2).strip().strip('"').strip("'")
+            continue
+        if current is None or _META_TAIL_RE.match(line):
+            continue
+        result[current] = f"{result[current]} {line}".strip()
+
+    return {i: t for i, t in result.items() if t}
 
 
 # Convenience function for direct use
