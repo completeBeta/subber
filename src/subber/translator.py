@@ -102,6 +102,8 @@ class Translator:
         self.glossary = glossary or []
         # Subtitle line wrapping applied when the translation is written back.
         self.wrap_chars = int(wrap_chars or 0)
+        # Filled in by translate(): per-file quality counters (see translation_qa).
+        self.last_qa: dict = {}
 
     def translate(
         self,
@@ -178,6 +180,18 @@ class Translator:
                 repaired_cues,
             )
 
+        # A cue that came back as nothing but its speaker label lost its dialogue —
+        # ask for that single line again rather than shipping a bare "(Subaru)".
+        dialogue_fixed = self._repair_missing_dialogue(
+            entries, translated, source_lang, target_lang
+        )
+        if dialogue_fixed:
+            import logging
+            logging.getLogger("subber").warning(
+                "  Repaired %d cue(s) that came back as a speaker label with no dialogue",
+                dialogue_fixed,
+            )
+
         # Retry any entries still in the source language — the LLM can omit line
         # numbers (duplicate/hallucinated segments) or pass source text straight
         # through (e.g. a truncated response on a huge vocalization chunk),
@@ -198,6 +212,26 @@ class Translator:
                 except Exception:
                     pass  # retry is best-effort — keep the main-pass results
 
+        # Summarise the result so each file carries a machine-checkable verdict
+        # instead of having to be read to be trusted.
+        self.last_qa = translation_qa(entries, translated, source_lang, self.wrap_chars)
+        self.last_qa.update({
+            "chunks_repaired": repairs,
+            "label_desyncs": repaired_cues,
+            "dialogue_repaired": dialogue_fixed,
+            "chunks": len(chunks),
+        })
+        import logging
+        logging.getLogger("subber").info(
+            "  QA: %d cues · %d empty · %d label-only · %d sound-cue-only · "
+            "%d untranslated · longest %d chars · %d/%d chunks repaired · "
+            "%d label-drift · %d dialogue",
+            self.last_qa["cues"], self.last_qa["empty"], self.last_qa["label_only"],
+            self.last_qa["sound_cues"], self.last_qa["untranslated"],
+            self.last_qa["longest_line"], repairs, len(chunks), repaired_cues,
+            dialogue_fixed,
+        )
+
         # Apply translations back to the subtitle events
         for i, event in enumerate(subs.events):
             if i in translated:
@@ -208,6 +242,49 @@ class Translator:
 
         subs.save(str(output_path))
         return output_path
+
+    def _repair_missing_dialogue(
+        self,
+        entries: list[dict],
+        translated: dict[int, str],
+        source_lang: str,
+        target_lang: str,
+    ) -> int:
+        """Re-request cues that came back as nothing but a speaker label.
+
+        A model occasionally answers `[7] (Subaru)` for a line that has dialogue in
+        the source — the label is there, the words are not, so nothing upstream
+        notices and the viewer gets an empty subtitle. Each suspect line is asked
+        for on its own, which is the one case a model can't silently merge away.
+
+        Returns the number of cues replaced.
+        """
+        suspects = []
+        for e in entries:
+            out = (translated.get(e["index"]) or "").strip()
+            if not out or not _EN_LABEL_RE.fullmatch(out):
+                continue
+            source = e["text"].strip()
+            if not _JP_LABEL_RE.match(source):
+                continue
+            remainder = _JP_LABEL_RE.sub("", source, count=1).strip()
+            if len(remainder) >= 2:  # the source really does have words after the label
+                suspects.append(e)
+
+        fixed = 0
+        for e in suspects:
+            try:
+                raw = self._translate_chunk(
+                    [e], source_lang, target_lang, temperature=0.0
+                )
+                got = _parse_numbered_response(raw)
+                text = (got.get(e["index"]) or next(iter(got.values()), "")).strip()
+            except Exception:
+                continue
+            if text and not _EN_LABEL_RE.fullmatch(text):
+                translated[e["index"]] = text
+                fixed += 1
+        return fixed
 
     def _repair_label_desync(
         self,
@@ -497,6 +574,7 @@ class MultiBackendTranslator:
         self.backends = backends
         self.shared_kwargs = shared_kwargs
         self._translators: dict[str, Translator] = {}
+        self.last_qa: dict = {}
 
     @property
     def chunk_size(self) -> int:
@@ -552,6 +630,7 @@ class MultiBackendTranslator:
                     character_map=character_map,
                 )
                 _log.info("  Backend succeeded: %s (%s)", name, model)
+                self.last_qa = getattr(translator, "last_qa", {}) or {}
                 if i > 0:
                     _log.info(
                         "Translation succeeded via fallback backend %s after %d failures",
@@ -727,6 +806,54 @@ def _wrap_subtitle(text: str, width: int = 42) -> str:
     for segment in re.split(r"\\N|\n", text):
         out.extend(_wrap_line(segment, width))
     return "\n".join(out)
+
+
+def translation_qa(
+    entries: list[dict],
+    translated: dict[int, str],
+    source_lang: str,
+    wrap_chars: int = 0,
+) -> dict:
+    """Per-file quality counters, measured on the finished translations.
+
+    These are the defects that are visible in a shipped subtitle: a cue with no
+    text, a cue that is only a speaker label, a line left in the source language,
+    and a line too long for the screen. Counting them costs nothing and turns
+    "looks fine" into a number.
+    """
+    empty = label_only = untranslated = sound_cues = 0
+    longest = 0
+    for e in entries:
+        text = (translated.get(e["index"]) or "").strip()
+        if not text:
+            empty += 1
+            continue
+        if _EN_LABEL_RE.fullmatch(text):
+            source = e["text"].strip()
+            if _JP_LABEL_RE.match(source):
+                remainder = _JP_LABEL_RE.sub("", source, count=1).strip()
+                # "（扉の開閉音）" → "(Sound of a door)" is a complete translation of a
+                # sound cue, not a dropped line.
+                if len(remainder) >= 2:
+                    label_only += 1
+                else:
+                    sound_cues += 1
+            else:
+                label_only += 1
+        if _still_source_lang(text, source_lang):
+            untranslated += 1
+        for line in text.split("\n"):
+            longest = max(longest, len(line))
+    return {
+        "cues": len(entries),
+        "empty": empty,
+        "label_only": label_only,
+        "sound_cues": sound_cues,
+        "untranslated": untranslated,
+        "longest_line": longest,
+        "wrap_chars": wrap_chars,
+        "clean": empty == 0 and label_only == 0 and untranslated == 0,
+    }
 
 
 def _parse_numbered_response(text: str) -> dict[int, str]:

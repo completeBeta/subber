@@ -134,11 +134,17 @@ cost:
     - [1, 4]
     - [6, 10]
   timezone: UTC                  # Your timezone for peak hour calculation
-  # Per-model overrides (optional):
-  # models:
-  #   meta-llama/llama-3.1-8b-instruct:
-  #     input_cost_per_million: 0.03
-  #     output_cost_per_million: 0.05
+  # Per-model prices, keyed by the exact model id used in translation.backends.
+  # The estimator picks the entry for the model that actually ran, so a model swap
+  # doesn't keep reporting the old model's price. Built-in defaults cover Hy-MT2,
+  # Llama 3.1 8B and local Ollama; anything you add here wins.
+  models:
+    tencent/hy-mt2-30b-a3b:
+      input_cost_per_million: 0.074
+      output_cost_per_million: 0.295
+    meta-llama/llama-3.1-8b-instruct:
+      input_cost_per_million: 0.05
+      output_cost_per_million: 0.08
 
 # --- Limits ---
 limits:

@@ -298,7 +298,7 @@ async function refreshHistory() {
             if (j.status === "translating" || j.status === "pending") hasActive = true;
             html += `<div class="history-item">
                 <div><strong title="${escapeHtml(j.original_name)}">${escapeHtml(j.original_name)}</strong>
-                <span class="meta">${j.source_lang} → ${j.target_lang}</span>${bar}</div>
+                <span class="meta">${j.source_lang} → ${j.target_lang}</span>${bar}${qaLine(j.qa, j.status)}</div>
                 <div style="display:flex;align-items:center;gap:0.5rem">
                 <span class="status ${cls}">${label}</span>${dl}</div></div>`;
         });
@@ -354,6 +354,27 @@ async function restoreActiveJob() {
             pollJob(currentJobId);
         }
     } catch (err) { /* silent */ }
+}
+
+// Compact per-file quality verdict shown under a finished translation.
+// Leads with the final state (clean or not) and appends how much auto-repair it
+// took — "✓ clean · 3 auto-repairs" means the file is good but the model wobbled.
+function qaLine(qa, status) {
+    if (status !== "done" || !qa || !qa.cues) return "";
+    const defects = [];
+    if (qa.empty) defects.push(`${qa.empty} empty`);
+    if (qa.label_only) defects.push(`${qa.label_only} label-only`);
+    if (qa.untranslated) defects.push(`${qa.untranslated} untranslated`);
+    const repairs = (qa.chunks_repaired || 0) + (qa.label_desyncs || 0) + (qa.dialogue_repaired || 0);
+    const repairTxt = repairs ? `${repairs} auto-repair${repairs === 1 ? "" : "s"}` : "";
+    const tip = `${qa.cues} cues checked · longest line ${qa.longest_line || 0} chars` +
+        (qa.sound_cues ? ` · ${qa.sound_cues} sound-only cues` : "");
+    if (defects.length) {
+        return `<span class="qa qa-warn" title="${tip}">⚠ ${defects.join(" · ")}` +
+            (repairTxt ? ` · ${repairTxt}` : "") + `</span>`;
+    }
+    return `<span class="qa qa-clean" title="${tip}">✓ clean` +
+        (repairTxt ? ` · ${repairTxt}` : "") + `</span>`;
 }
 
 function escapeHtml(text) {

@@ -73,6 +73,7 @@ class TranslationJob:
     created_at: float = field(default_factory=time.time)
     total_chunks: int = 0
     chunks_done: int = 0
+    qa: dict = field(default_factory=dict)  # per-file quality counters (see translator.translation_qa)
 
     @property
     def progress_pct(self) -> int:

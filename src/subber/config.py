@@ -89,6 +89,19 @@ DEFAULTS = {
         "input_cost_per_million": 0.14,
         "output_cost_per_million": 0.28,
         "chars_per_token": 2.5,
+        # Per-model list prices (USD per million tokens). The estimator uses the
+        # entry matching the backend's model id, so switching translation model
+        # doesn't silently keep reporting the old model's price. Verified against
+        # OpenRouter's published pricing on 2026-10-24; override or add your own
+        # under cost.models.<model-id>.
+        "models": {
+            "tencent/hy-mt2-30b-a3b": {"input_cost_per_million": 0.074, "output_cost_per_million": 0.295},
+            "tencent/hy-mt2-7b": {"input_cost_per_million": 0.074, "output_cost_per_million": 0.295},
+            "tencent/hy-mt2-1.8b": {"input_cost_per_million": 0.044, "output_cost_per_million": 0.177},
+            "meta-llama/llama-3.1-8b-instruct": {"input_cost_per_million": 0.05, "output_cost_per_million": 0.08},
+            # Self-hosted Ollama: no metered cost.
+            "translategemma:4b": {"input_cost_per_million": 0.0, "output_cost_per_million": 0.0},
+        },
         "peak_enabled": False,
         "peak_multiplier": 2.0,
         "peak_hours_utc": [[1,4],[6,10]],

@@ -2,6 +2,26 @@
 
 All notable changes to Subber are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/), and this project versions with [SemVer](https://semver.org/).
 
+## [0.11.2] - 2026-10-24
+
+### Added
+- **Per-file translation QA summary.** Every finished translation now logs one line
+  — `QA: 388 cues · 0 empty · 0 label-only · 0 untranslated · longest 41 chars ·
+  2/20 chunks repaired · 3 label-drift · 1 dialogue` — and the same counters travel
+  in the job API (`qa`) and appear under the file in Recent Translations as
+  `✓ clean` or `⚠ 2 chunk repairs · 3 drift repairs`. You can tell a good output from
+  a bad one without opening the subtitle.
+
+### Fixed
+- **A cue that comes back as only a speaker label no longer ships empty.** When the
+  source has dialogue but the model answers `[7] (Subaru)`, that single line is
+  requested again on its own and the text is restored.
+- **Cost estimates follow the model that actually ran.** Built-in per-model prices
+  (Hy-MT2 30B-A3B, Hy-MT2 7B/1.8B, Llama 3.1 8B, local Ollama = free) are applied
+  under `cost.models`, so switching to Hy-MT2 no longer keeps reporting Llama's
+  price — which under-reported the real cost by roughly 4x. User entries in
+  `cost.models` still win over the built-ins.
+
 ## [0.11.1] - 2026-10-24
 
 ### Added

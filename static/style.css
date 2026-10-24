@@ -549,6 +549,15 @@ h2 {
     margin: 1.1rem 0 0.5rem;
 }
 .result-group span { color: var(--accent); }
+/* Per-file translation quality verdict under a history row */
+.qa {
+    display: block;
+    font-size: 0.72rem;
+    margin-top: 0.2rem;
+    white-space: normal;
+}
+.qa-clean { color: var(--success); }
+.qa-warn { color: #f0b429; }
 .rate-limit-badge {
     font-size: 0.75rem;
     background: var(--surface-hover);

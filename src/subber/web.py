@@ -561,6 +561,7 @@ async def api_job_status(job_id: str):
         "total_chunks": job.total_chunks,
         "error": job.error,
         "age_hours": round(job.age_hours, 1),
+        "qa": job.qa or {},
     }
 
 
@@ -595,6 +596,7 @@ async def api_jobs_list():
                 "original_name": j.original_name,
                 "source_lang": j.source_lang, "target_lang": j.target_lang,
                 "age_hours": round(j.age_hours, 1),
+                "qa": j.qa or {},
             }
             for j in recent_jobs
         ],
@@ -2041,6 +2043,7 @@ async def _run_translation(job_id: str) -> None:
         )
         _elapsed = _time.monotonic() - _t0
         _log.info("Translation complete in %.1fs: %s", _elapsed, sanitize_log(job.original_name))
+        job.qa = getattr(translator, "last_qa", {}) or {}
         job.status = JobStatus.DONE
     except TranslationCancelled:
         _log.info("Translation cancelled: %s", sanitize_log(job.original_name))
