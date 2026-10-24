@@ -2,6 +2,29 @@
 
 All notable changes to Subber are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/), and this project versions with [SemVer](https://semver.org/).
 
+## [0.11.4] - 2026-10-24
+
+### Added
+- **Term learning (phase 2 of per-show glossaries).** After a file is translated, the
+  show's glossary learns the names and terms that repeated in it, by scoring how
+  consistently one English phrase accompanies each Japanese candidate across the
+  cues it appears in (`consistency × distinctiveness`). Katakana names/loanwords and
+  capitalised kanji terms qualify, phrases are preferred over single words
+  (`魔女教 → "Witch Cult"`, not `"Witch"`), the list is capped at 40, and a term is
+  never overwritten once stored. On a real Re:Zero episode this learned
+  `ユリウス → Julius`, `ユーリ → Yuri`, `ミミ → Mimi`, `エミリア → Emilia`,
+  `魔女教 → Witch Cult`, `大罪司教 → Sin Archbishop`, `白鯨 → White Whale` with no
+  input from you, and the next run injected all seven; term usage in the output
+  stayed identical to the run before learning, so the glossary locked in wording
+  the model was already producing rather than changing it.
+  Safety rails: nothing is learned from a file that translated badly (>5% empty or
+  untranslated cues), fragments of a known character name are skipped (so a nickname
+  like `リア` can't be cemented as the model's wrong guess), and an uncertain file
+  learns nothing rather than something wrong.
+- Learned terms are logged per file (`Learned 9 term(s) for anilist-21355: …`) and
+  counted in the QA line, and a disagreement with an existing term is logged as a
+  conflict instead of silently changing it.
+
 ## [0.11.3] - 2026-10-24
 
 ### Added

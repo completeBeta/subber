@@ -172,7 +172,7 @@ def _check_upload_size(size: int, max_mb: int | None = None) -> None:
 
 
 # ── Translator config ──
-def _get_translator(glossary_terms=None):
+def _get_translator(glossary_terms=None, glossary_key=None):
     from .translator import MultiBackendTranslator
     ts = config.translation_settings()
     backends = config.translation_backends()
@@ -185,6 +185,7 @@ def _get_translator(glossary_terms=None):
         timeout=ts.get("timeout", 120),
         glossary=ts.get("glossary") or [] if glossary_terms is None else glossary_terms,
         wrap_chars=ts.get("wrap_chars", 42),
+        glossary_key=glossary_key,
     )
 
 
@@ -2048,7 +2049,7 @@ async def _run_translation(job_id: str) -> None:
         elif _glossary_terms:
             _log.info("  Glossary: %d global term(s) (show not identified)", len(_glossary_terms))
 
-        translator = _get_translator(_glossary_terms)
+        translator = _get_translator(_glossary_terms, _key)
 
         import pysubs2
         subs = pysubs2.load(str(input_path), encoding="utf-8-sig")

@@ -149,7 +149,7 @@ Upload `.srt`, `.ass`, `.vtt`, or `.zip` subtitle files and translate them betwe
 **Output behaviour:**
 - Cues are word-wrapped at `translation.wrap_chars` characters (default 42, `0` turns wrapping off); existing line breaks are kept.
 - Each cue is checked against the response it came from — if the model merged, dropped or duplicated a line, that chunk is retried at temperature 0 and any remaining lines are translated individually, so dialogue can't shift onto the next speaker.
-- `translation.glossary` injects a per-show terminology list (`リア = Lia`) so names and recurring terms render identically across episodes. Each show's list is kept in its own file under `config/glossary/` (keyed by AniList/TMDB id) and seeded automatically from the AniList character list the first time the show is translated — nothing to fill in by hand. The global `translation.glossary` list is only used when a file's show can't be identified.
+- `translation.glossary` injects a per-show terminology list (`リア = Lia`) so names and recurring terms render identically across episodes. Each show's list is kept in its own file under `config/glossary/` (keyed by AniList/TMDB id), seeded automatically from the AniList character list the first time the show is translated, and then taught by the episodes themselves — terms that repeat across a file are learned from the source/translation pairs the run just produced, so nothing needs filling in by hand. The global `translation.glossary` list is only used when a file's show can't be identified.
 - The Logs tab records the effective backend chain for every run (`Backend chain: Name (model) -> …`), so you can confirm which model actually translated a file.
 
 ### 🔍 Search

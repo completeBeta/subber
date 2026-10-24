@@ -1003,6 +1003,7 @@ async def _translate_and_sync(
                 max_retries=max_retries,
                 glossary=glossary_terms,
                 wrap_chars=ts.get("wrap_chars", 42),
+                glossary_key=show_glossary.key_for(identity),
             )
 
             def _do_translate():

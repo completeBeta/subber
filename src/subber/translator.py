@@ -88,6 +88,7 @@ class Translator:
         timeout: float = 120.0,
         glossary: list | None = None,
         wrap_chars: int = 42,
+        glossary_key: str | None = None,
     ):
         self.api_base = api_base.rstrip("/")
         self.api_key = api_key
@@ -104,6 +105,9 @@ class Translator:
         self.wrap_chars = int(wrap_chars or 0)
         # Filled in by translate(): per-file quality counters (see translation_qa).
         self.last_qa: dict = {}
+        # Show this file belongs to (anilist-<id> / tmdb-<id>). When set, the
+        # finished translation teaches that show's glossary new terms.
+        self.glossary_key = glossary_key
 
     def translate(
         self,
@@ -231,6 +235,30 @@ class Translator:
             self.last_qa["longest_line"], repairs, len(chunks), repaired_cues,
             dialogue_fixed,
         )
+
+        # Learn this show's terminology from the pairs we just produced, so the
+        # next episode renders リア, ティビー, 魔女教 the same way this one did.
+        if self.glossary_key:
+            try:
+                from .term_mining import learn
+                learned = learn(self.glossary_key, entries, translated, self.last_qa)
+                self.last_qa["terms_learned"] = len(learned.get("added") or [])
+                if learned.get("added"):
+                    import logging
+                    logging.getLogger("subber").info(
+                        "  Learned %d term(s) for %s: %s",
+                        len(learned["added"]), self.glossary_key,
+                        ", ".join(learned["added"][:8]),
+                    )
+                if learned.get("conflicts"):
+                    import logging
+                    logging.getLogger("subber").warning(
+                        "  Glossary conflict(s) kept as-is: %s",
+                        "; ".join(learned["conflicts"][:5]),
+                    )
+            except Exception as exc:  # never fail a translation over learning
+                import logging
+                logging.getLogger("subber").warning("  Term learning skipped: %s", exc)
 
         # Apply translations back to the subtitle events
         for i, event in enumerate(subs.events):
