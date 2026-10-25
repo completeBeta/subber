@@ -43,6 +43,9 @@ _LATIN_WORD = re.compile(r"[^\W\d_][\w'’\-]{1,}", re.UNICODE)
 _HAS_KANA = re.compile(r"[ぁ-んァ-ヶ]")
 _HAS_HAN = re.compile(r"[一-龥]")
 _HAS_THAI = re.compile(r"[\u0e00-\u0e7f]")
+_HAS_ARABIC = re.compile(r"[\u0600-\u06ff]")
+# Arabic-script words are space-separated but have no case at all.
+_ARABIC_WORD = re.compile(r"[\u0600-\u06ff\u0750-\u077f]{3,}")
 _THAI_RUN = re.compile(r"[\u0e00-\u0e7f]{4,}")
 
 # English tokens carry the evidence; function words never do.
@@ -129,6 +132,8 @@ def script_of(text: str, source_lang: str | None = None) -> str:
         return "zh"
     if lang == "th" or _HAS_THAI.search(text):
         return "thai"
+    if lang in ("ar", "fa", "ur", "he", "iw") or _HAS_ARABIC.search(text):
+        return "nocase"
     return "latin"
 
 
@@ -221,6 +226,9 @@ def _candidates(text: str, script: str) -> set[str]:
         found |= _han_candidates(text)
     elif script == "thai":
         found |= _thai_candidates(text)
+    elif script == "nocase":
+        # Arabic/Hebrew/Persian: real word boundaries, but no capitals to lean on.
+        found |= set(_ARABIC_WORD.findall(text))
     else:
         found |= _latin_candidates(text)
     return found
@@ -338,7 +346,7 @@ def mine_terms(
             min_consistency = MIN_CONSISTENCY if katakana else MIN_CONSISTENCY_KANJI
             if not katakana and n < MIN_OCCURRENCES_KANJI:
                 continue
-        elif script == "thai":
+        elif script in ("thai", "nocase"):
             if n < 4:
                 continue
             min_consistency = 0.6
@@ -454,7 +462,7 @@ def mine_terms(
         for shorter in ordered[i + 1 :]:
             if shorter in drop or len(shorter.split()) >= len(longer.split()):
                 continue
-            if script in ("zh", "thai"):
+            if script in ("zh", "thai", "nocase"):
                 if shorter not in longer:
                     continue
             elif not re.search(rf"(?<!\w){re.escape(shorter)}(?!\w)", longer):

@@ -2,6 +2,24 @@
 
 All notable changes to Subber are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/), and this project versions with [SemVer](https://semver.org/).
 
+## [0.11.9] - 2026-10-25
+
+### Added
+- **Arabic / Hebrew / Persian sources ("no-case" scripts).** These have real word
+  boundaries but no capitalisation, so candidates are Arabic-script words of three or
+  more characters with a stricter bar (4+ cues, 0.6 consistency) and the English side
+  still has to look like a name.
+- **Spanish validated on a real series** (High School DxD S01): 8 terms learned from
+  one episode, all character names — `Yuma`, `Issei`, `Gremory`, `Matsuda`,
+  `Motohama`, `Hyoudou`, `Rias`, `Hyoudou Issei` — including the accented `Rías`
+  normalised to `Rias`.
+
+### Measured
+- Arabic (Steins;Gate S01E01, 866 cues): `ناكاباشي → Professor Nakabachi`,
+  `تايتر → Titor`, `أوكارين → Okarin`, `أوكابي → Okabe` were learned, but so were
+  some ordinary nouns (`رقم → Lab Member`). Names land; vocabulary is still noisier
+  than in Latin scripts, because there is no capitalisation to separate the two.
+
 ## [0.11.8] - 2026-10-25
 
 ### Added
