@@ -240,22 +240,26 @@ class Translator:
         # next episode renders リア, ティビー, 魔女教 the same way this one did.
         if self.glossary_key:
             try:
-                from .term_mining import learn
-                learned = learn(self.glossary_key, entries, translated, self.last_qa)
-                self.last_qa["terms_learned"] = len(learned.get("added") or [])
-                if learned.get("added"):
-                    import logging
-                    logging.getLogger("subber").info(
-                        "  Learned %d term(s) for %s: %s",
-                        len(learned["added"]), self.glossary_key,
-                        ", ".join(learned["added"][:8]),
-                    )
-                if learned.get("conflicts"):
-                    import logging
-                    logging.getLogger("subber").warning(
-                        "  Glossary conflict(s) kept as-is: %s",
-                        "; ".join(learned["conflicts"][:5]),
-                    )
+                from .show_glossary import is_japanese_source
+                if not is_japanese_source(source_lang):
+                    self.last_qa["terms_learned"] = 0
+                else:
+                    from .term_mining import learn
+                    learned = learn(self.glossary_key, entries, translated, self.last_qa)
+                    self.last_qa["terms_learned"] = len(learned.get("added") or [])
+                    if learned.get("added"):
+                        import logging
+                        logging.getLogger("subber").info(
+                            "  Learned %d term(s) for %s: %s",
+                            len(learned["added"]), self.glossary_key,
+                            ", ".join(learned["added"][:8]),
+                        )
+                    if learned.get("conflicts"):
+                        import logging
+                        logging.getLogger("subber").warning(
+                            "  Glossary conflict(s) kept as-is: %s",
+                            "; ".join(learned["conflicts"][:5]),
+                        )
             except Exception as exc:  # never fail a translation over learning
                 import logging
                 logging.getLogger("subber").warning("  Term learning skipped: %s", exc)

@@ -54,6 +54,19 @@ def glossary_dir() -> Path:
     return Path(config.CONFIG_PATH).parent / "glossary"
 
 
+_JA_LANGS = {"ja", "jp", "jpn", "japanese", "日本語"}
+
+
+def is_japanese_source(source_lang: str | None) -> bool:
+    """True when the source language is Japanese.
+
+    Show glossaries hold *Japanese* native names, so they only apply — and can only
+    be learned from — Japanese input. Injecting them into a Vietnamese or English
+    run would be pure noise in the prompt.
+    """
+    return (source_lang or "").strip().lower() in _JA_LANGS
+
+
 def key_for(identity) -> str | None:
     """Stable key for a show: anilist-<id> / tmdb-<id>, or None when unidentified."""
     if identity is None:

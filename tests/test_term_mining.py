@@ -250,6 +250,47 @@ def test_learn_without_key_is_a_noop(store):
 
 # ── end to end through the translator ───────────────────────────────────
 
+def test_is_japanese_source_flags_only_japanese():
+    assert show_glossary.is_japanese_source("ja")
+    assert show_glossary.is_japanese_source("JPN")
+    assert show_glossary.is_japanese_source("japanese")
+    assert not show_glossary.is_japanese_source("vi")
+    assert not show_glossary.is_japanese_source("en")
+    assert not show_glossary.is_japanese_source(None)
+
+
+def test_learning_is_skipped_for_a_non_japanese_source(store, tmp_path):
+    """A Vietnamese file must not teach a Japanese glossary anything."""
+    show_glossary.ensure_for_identity(_ident(21))
+    lines = ["Tôi sẽ trở nên mạnh mẽ"] * 24
+    srt = tmp_path / "in.srt"
+    srt.write_text(
+        "".join(
+            f"{i+1}\n00:00:{i:02d},000 --> 00:00:{i:02d},800\n{text}\n\n"
+            for i, text in enumerate(lines)
+        ),
+        encoding="utf-8",
+    )
+
+    from subber.translator import Translator
+
+    translator = Translator(api_key="x", model="m", chunk_size=50, glossary_key="anilist-21")
+
+    def fake_api(messages, *a, **k):
+        body = messages[-1]["content"]
+        out = []
+        for block in body.split("[")[1:]:
+            num, _, _rest = block.partition("]")
+            if num.isdigit():
+                out.append(f"[{num}] I will become strong Magical Girl")
+        return "\n".join(out)
+
+    with mock.patch.object(translator, "_call_api", side_effect=fake_api):
+        translator.translate(srt, tmp_path / "out.srt", "vi", "en")
+
+    assert show_glossary.load("anilist-21").get("terms") == {}
+
+
 def test_translation_teaches_the_show_glossary(store, tmp_path):
     show_glossary.ensure_for_identity(_ident(15))
     lines = ["リベンジするぞ"] * 4 + ["これは普通の文です"] * 20

@@ -2,6 +2,23 @@
 
 All notable changes to Subber are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/), and this project versions with [SemVer](https://semver.org/).
 
+## [0.11.6] - 2026-10-25
+
+### Fixed
+- **Show glossaries apply to Japanese sources only.** A Vietnamese or English file
+  used to receive the show's Japanese term list in its prompt — pure noise, since
+  those keys can never match — and its term miner (which looks for katakana and kanji)
+  ran on text it cannot read. Both paths are now gated on the source language and the
+  log says why: `Glossary: skipped (source language vi is not Japanese)`.
+
+### Verified
+- Vietnamese → English (337 cues) through the test instance: language detected as
+  `vi`, glossary skipped, QA clean (0 empty, 0 untranslated, 0 label-only, 0 chunk
+  repairs), spot-checked translations sensible (`Hắc Dực Bá Vương` → "Black Winged
+  Overlord", `Tuyệt vời lắm, các Dũng sĩ!` → "Well done, warriors!").
+- An English subtitle file is detected as `en` and skipped as already-in-target,
+  rather than being fed through the translator.
+
 ## [0.11.5] - 2026-10-24
 
 ### Fixed
