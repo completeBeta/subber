@@ -115,6 +115,10 @@ MIN_SCORE = 0.2
 MAX_TERMS = 40
 MAX_NGRAM = 3
 MIN_CUES_TO_LEARN = 20
+# Evidence from one episode is not enough for languages whose script gives no
+# signal about which words are names: one bad pairing would be permanent.
+MIN_EPISODES_FOR_TRUST = 2
+MAX_PENDING = 200
 MAX_FAILED_RATIO = 0.05
 MIN_CASE_RATIO = 0.7        # Japanese targets
 MIN_CASE_RATIO_STRICT = 0.9  # other languages: the target has to behave like a name
@@ -493,14 +497,20 @@ def learn(
     translated: dict[int, str],
     qa: dict | None = None,
     source_lang: str | None = None,
+    episode_id: str | None = None,
 ) -> dict:
     """Mine one finished episode into the show's glossary, for its language.
 
-    Returns {"added": [...], "kept": [...], "conflicts": [...], "skipped": [...]}
-    of "source = target" strings. Nothing is learned from a file whose translation
+    A term has to be seen in `MIN_EPISODES_FOR_TRUST` distinct episodes before it is
+    injected, so a wrong pair from one file cannot become permanent — names recur,
+    one-off vocabulary does not. Without an `episode_id` the caller cannot count
+    episodes and single-episode evidence is accepted.
+
+    Returns {"added", "kept", "conflicts", "skipped", "awaiting"} of
+    "source = target" strings. Nothing is learned from a file whose translation
     failed in more than a few places, because bad pairs make bad terms.
     """
-    empty = {"added": [], "kept": [], "conflicts": [], "skipped": []}
+    empty = {"added": [], "kept": [], "conflicts": [], "skipped": [], "awaiting": []}
     if not key:
         return empty
     qa = qa or {}
@@ -531,7 +541,16 @@ def learn(
         # AniList names are Japanese; the guard only makes sense there.
         return lang == "ja" and is_name_fragment(term, names)
 
-    added, kept, conflicts, skipped = [], [], [], []
+    pending_all: dict = data.setdefault("pending", {})
+    if not isinstance(pending_all, dict):
+        pending_all = {}
+        data["pending"] = pending_all
+    lang_pending: dict[str, dict] = {
+        str(k): dict(v) for k, v in pending_all.items() if isinstance(v, dict)
+    }
+    pending: dict[str, dict] = lang_pending.setdefault(lang, {})
+
+    added, kept, conflicts, skipped, awaiting = [], [], [], [], []
     ranked = sorted(mined.items(), key=lambda kv: (kv[1]["score"], kv[1]["n"]), reverse=True)
     for term, info in ranked:
         if term in terms:
@@ -543,20 +562,63 @@ def learn(
         if _is_name_fragment(term):
             skipped.append(f"{term} (fragment of a known character name)")
             continue
+        # Accumulate evidence across episodes before trusting the pairing.
+        seen = pending.get(term)
+        if seen and str(seen.get("target", "")).lower() == info["target"].lower():
+            episodes_seen = list(seen.get("episodes") or [])
+            if episode_id and episode_id not in episodes_seen:
+                episodes_seen.append(episode_id)
+            seen["episodes"] = episodes_seen
+            seen["n"] = max(int(seen.get("n") or 0), info["n"])
+            seen["score"] = max(float(seen.get("score") or 0), info["score"])
+        else:
+            seen = {
+                "target": info["target"],
+                "episodes": [episode_id] if episode_id else [],
+                "n": info["n"],
+                "score": info["score"],
+            }
+            pending[term] = seen
+
         if len(terms) >= MAX_TERMS:
             break
-        terms[term] = info["target"]
-        lang_stats[term] = {"n": info["n"], "score": info["score"]}
-        added.append(f"{term} = {info['target']}")
+        confirmed = (
+            episode_id is None
+            or len(seen.get("episodes") or []) >= MIN_EPISODES_FOR_TRUST
+        )
+        if not confirmed:
+            awaiting.append(f"{term} = {seen['target']} ({len(seen.get('episodes') or [])}/{MIN_EPISODES_FOR_TRUST})")
+            continue
+        terms[term] = seen["target"]
+        pending.pop(term, None)
+        lang_stats[term] = {"n": seen["n"], "score": seen["score"]}
+        added.append(f"{term} = {seen['target']}")
 
-    if not added and not conflicts:
-        return {"added": [], "kept": kept, "conflicts": [], "skipped": skipped}
+    # Keep the candidate list bounded: oldest evidence goes first.
+    while len(pending) > MAX_PENDING:
+        pending.pop(next(iter(pending)))
 
+    # Write state first: candidates have to survive to the next episode even when
+    # nothing was trusted this time.
     by_lang[lang] = terms
     data["terms"] = by_lang
+    lang_pending[lang] = pending
+    data["pending"] = lang_pending
     data["term_stats"] = stats
+
+    if not added and not conflicts and not awaiting:
+        return {"added": [], "kept": kept, "conflicts": [], "skipped": skipped, "awaiting": []}
+    if not added and not conflicts:
+        import datetime as _dt
+
+        data["updated"] = _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
+        show_glossary.save(key, data)
+        return {"added": [], "kept": kept, "conflicts": [], "skipped": skipped,
+                "awaiting": awaiting}
+
     import datetime as _dt
 
     data["updated"] = _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
     show_glossary.save(key, data)
-    return {"added": added, "kept": kept, "conflicts": conflicts, "skipped": skipped}
+    return {"added": added, "kept": kept, "conflicts": conflicts,
+            "skipped": skipped, "awaiting": awaiting}

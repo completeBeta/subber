@@ -2,6 +2,24 @@
 
 All notable changes to Subber are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/), and this project versions with [SemVer](https://semver.org/).
 
+## [0.11.11] - 2026-10-25
+
+### Changed
+- **A learned term must be seen in two distinct episodes before it is injected.**
+  In scripts without capitalisation a single file cannot tell a name from a noun, so
+  one bad pairing used to become permanent (`رقم → Lab Member`). Candidates now wait
+  in `pending` until a second episode confirms the same rendering; a different
+  rendering on the second episode resets the evidence. The log shows what is waiting:
+  `Glossary candidate(s) awaiting a second episode: … (1/2)`.
+
+### Measured
+- Arabic, Steins;Gate E01 then E02, glossary reset beforehand.
+  E01: **0 terms trusted**, 6 candidates pending — including the bad
+  `الصحفي = press conference` and `عضو = Lab Member`.
+  E02 confirmed only what recurred: `مايوري → Mayuri`, `تايتر → Titor`,
+  `ماكسي → Maxi Chris`, `أوكارين → Okarin`, `أوكابي → Okabe`. The two wrong nouns did
+  not repeat and were never injected.
+
 ## [0.11.10] - 2026-10-25
 
 ### Fixed

@@ -242,7 +242,8 @@ class Translator:
             try:
                 from .term_mining import learn
                 learned = learn(
-                    self.glossary_key, entries, translated, self.last_qa, source_lang
+                    self.glossary_key, entries, translated, self.last_qa, source_lang,
+                    episode_id=str(input_path),
                 )
                 self.last_qa["terms_learned"] = len(learned.get("added") or [])
                 if learned.get("added"):
@@ -251,6 +252,12 @@ class Translator:
                         "  Learned %d term(s) for %s: %s",
                         len(learned["added"]), self.glossary_key,
                         ", ".join(learned["added"][:8]),
+                    )
+                if learned.get("awaiting"):
+                    import logging
+                    logging.getLogger("subber").info(
+                        "  Glossary candidate(s) awaiting a second episode: %s",
+                        ", ".join(learned["awaiting"][:6]),
                     )
                 if learned.get("conflicts"):
                     import logging

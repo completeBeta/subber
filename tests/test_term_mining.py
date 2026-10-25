@@ -292,6 +292,7 @@ def test_learning_is_skipped_for_a_non_japanese_source(store, tmp_path):
 
 
 def test_translation_teaches_the_show_glossary(store, tmp_path):
+    """Two episodes confirm what one episode only proposes."""
     show_glossary.ensure_for_identity(_ident(15))
     lines = ["リベンジするぞ"] * 4 + ["これは普通の文です"] * 20
     srt = tmp_path / "in.srt"
@@ -318,8 +319,17 @@ def test_translation_teaches_the_show_glossary(store, tmp_path):
                 out.append(f"[{num}] {en}")
         return "\n".join(out)
 
+    # Episode 1 proposes the term, episode 2 confirms it (different input files,
+    # because the episode identity comes from the input path).
+    ep2 = tmp_path / "in2.srt"
+    ep2.write_text(srt.read_text(encoding="utf-8"), encoding="utf-8")
     with mock.patch.object(translator, "_call_api", side_effect=fake_api):
-        translator.translate(srt, tmp_path / "out.srt", "ja", "en")
+        translator.translate(srt, tmp_path / "out1.srt", "ja", "en")
+        first = show_glossary.load("anilist-15")
+        assert (first["terms"].get("ja") or {}) == {}
+        assert "リベンジ" in first["pending"]["ja"]
+
+        translator.translate(ep2, tmp_path / "out2.srt", "ja", "en")
 
     data = show_glossary.load("anilist-15")
     assert (data["terms"].get("ja") or {}).get("リベンジ") == "Revenger Blade"
@@ -424,3 +434,54 @@ def test_flat_glossary_files_migrate_to_per_language(store):
 
     data = show_glossary.ensure_for_identity(_ident(31))
     assert data["terms"] == {"ja": {"魔女教": "Witch Cult"}}
+
+
+# ── evidence from two episodes, not one ────────────────────────────────
+
+def _wrong_noun_fixture():
+    rows = [
+        ("Đây là một câu bình thường", f"Just an ordinary line number {i}")
+        for i in range(20)
+    ] + [
+        ("أرقام كثيرة هنا", "There are many Lab Member."),
+        ("أرقام أخرى", "Some Lab Member."),
+        ("هذه أرقام", "These are Lab Member."),
+        ("فقط أرقام", "Only Lab Member."),
+    ]
+    return _pairs(*rows)
+
+
+def test_one_episode_does_not_trust_a_term(store):
+    """A wrong pairing from a single file must not become permanent."""
+    show_glossary.ensure_for_identity(_ident(40))
+    entries, translated = _wrong_noun_fixture()
+    result = term_mining.learn(
+        "anilist-40", entries, translated, {"cues": 24}, "ar", episode_id="E01"
+    )
+    assert result["added"] == []
+    assert any("1/2" in a for a in result["awaiting"])
+    assert show_glossary.load("anilist-40")["terms"].get("ar") in (None, {})
+
+
+def test_second_episode_confirms_the_term(store):
+    show_glossary.ensure_for_identity(_ident(41))
+    entries, translated = _wrong_noun_fixture()
+    term_mining.learn("anilist-41", entries, translated, {"cues": 24}, "ar", episode_id="E01")
+    result = term_mining.learn(
+        "anilist-41", entries, translated, {"cues": 24}, "ar", episode_id="E02"
+    )
+    assert result["added"], "a term seen in two episodes should be trusted"
+    assert show_glossary.load("anilist-41")["terms"]["ar"]["أرقام"] == "Lab Member"
+
+
+def test_conflicting_second_episode_resets_the_evidence(store):
+    show_glossary.ensure_for_identity(_ident(42))
+    entries, translated = _wrong_noun_fixture()
+    term_mining.learn("anilist-42", entries, translated, {"cues": 24}, "ar", episode_id="E01")
+    other = {i: "Numbers everywhere" for i in translated}
+    result = term_mining.learn(
+        "anilist-42", entries, other, {"cues": 24}, "ar", episode_id="E02"
+    )
+    assert result["added"] == []
+    data = show_glossary.load("anilist-42")
+    assert data["terms"].get("ar") in (None, {})
