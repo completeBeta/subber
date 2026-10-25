@@ -51,8 +51,36 @@ def parse(path: Path) -> list[dict]:
     return entries
 
 
+_KANA_RX = re.compile(r"[ぁ-んァ-ヶ]")
+_HANGUL_RX = re.compile(r"[가-힣\u1100-\u11ff\u3130-\u318f]")
+_HAN_RX = re.compile(r"[一-龥]")
+
+
+def _script_language(text: str) -> str | None:
+    """Language implied by the writing system, or None when it's inconclusive.
+
+    langdetect confuses Traditional Chinese with Korean on short, subtitle-sized
+    samples (`走過路過不要錯過` comes back as "ko"), and that misdetection decides
+    which language the translator is told it is reading. Scripts are unambiguous, so
+    they take precedence over the statistical guess.
+    """
+    kana = len(_KANA_RX.findall(text))
+    hangul = len(_HANGUL_RX.findall(text))
+    han = len(_HAN_RX.findall(text))
+    if kana >= 3:
+        return "ja"           # kana only exists in Japanese
+    if hangul >= 3 and hangul > han:
+        return "ko"
+    if han >= 5:
+        return "zh"           # Han with no kana and no Hangul
+    return None
+
+
 def detect_language(text: str) -> str:
     """Detect language of a subtitle text sample."""
+    script = _script_language(text)
+    if script:
+        return script
     from langdetect import detect
     try:
         return detect(text)

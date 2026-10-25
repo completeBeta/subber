@@ -2,6 +2,23 @@
 
 All notable changes to Subber are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/), and this project versions with [SemVer](https://semver.org/).
 
+## [0.11.10] - 2026-10-25
+
+### Fixed
+- **Traditional Chinese was detected as Korean**, so a Chinese file was announced to
+  the translator as Korean. `langdetect` returns `ko` on short Traditional samples
+  (`走過路過不要錯過…`) and subtitle files are nothing but short samples. The writing
+  system now decides before the statistical guess: kana → Japanese, Hangul → Korean,
+  Han without either → Chinese; Latin scripts still go through `langdetect`.
+
+### Measured
+- Chinese (The Daily Life of the Immortal King, Netflix zh-Hant, 3 episodes):
+  detected `zh`, identified as `anilist-114121`, glossary grew 1 → 21 → 37 terms.
+  Names came through correctly — `陳超 → Chao Chen`, `郭豪 → Hao Guo`,
+  `培元丹 → Peiyuan`, `嗶哩嗶哩 → Bilibili` — alongside some ordinary phrases that are
+  translated correctly anyway (`老闆 → Boss`, `乾脆麵 → instant noodles`). Low risk,
+  but noisier than French or Spanish.
+
 ## [0.11.9] - 2026-10-25
 
 ### Added

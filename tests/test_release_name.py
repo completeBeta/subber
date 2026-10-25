@@ -117,3 +117,4 @@ def test_no_markers_still_gives_a_title():
     assert info["show"].startswith("Some Show")
     assert info["episode"] is None
     assert info["quality"] == "1080P"
+
