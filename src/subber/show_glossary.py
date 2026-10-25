@@ -54,17 +54,74 @@ def glossary_dir() -> Path:
     return Path(config.CONFIG_PATH).parent / "glossary"
 
 
-_JA_LANGS = {"ja", "jp", "jpn", "japanese", "日本語"}
+_LANG_ALIASES = {
+    "ja": "ja", "jp": "ja", "jpn": "ja", "japanese": "ja", "日本語": "ja",
+    "fr": "fr", "fra": "fr", "fre": "fr", "french": "fr", "français": "fr",
+    "zh": "zh", "chi": "zh", "zho": "zh", "cmn": "zh", "chinese": "zh",
+    "vi": "vi", "vie": "vi", "vietnamese": "vi",
+    "es": "es", "spa": "es", "spanish": "es",
+    "pt": "pt", "por": "pt", "portuguese": "pt",
+    "de": "de", "deu": "de", "ger": "de", "german": "de",
+    "it": "it", "ita": "it", "italian": "it",
+    "ko": "ko", "kor": "ko", "korean": "ko",
+    "en": "en", "eng": "en", "english": "en",
+}
+
+
+def normalize_lang(source_lang: str | None) -> str:
+    """Two-letter code for a source language ('fra'/'French' → 'fr')."""
+    raw = (source_lang or "").strip().lower()
+    return _LANG_ALIASES.get(raw, raw[:2] or "unknown")
 
 
 def is_japanese_source(source_lang: str | None) -> bool:
     """True when the source language is Japanese.
 
-    Show glossaries hold *Japanese* native names, so they only apply — and can only
-    be learned from — Japanese input. Injecting them into a Vietnamese or English
-    run would be pure noise in the prompt.
+    Japanese is the only language whose *names* we can seed from AniList (it lists
+    native Japanese names); every other language has to be learned from the text.
     """
-    return (source_lang or "").strip().lower() in _JA_LANGS
+    return normalize_lang(source_lang) == "ja"
+
+
+def _migrate_terms(data: dict) -> bool:
+    """Older files stored `terms: {source: target}`; newer ones are per-language."""
+    terms = data.get("terms")
+    if isinstance(terms, dict) and terms and all(isinstance(v, str) for v in terms.values()):
+        data["terms"] = {"ja": dict(terms)}
+        return True
+    if terms is None:
+        data["terms"] = {}
+        return True
+    return False
+
+
+def terms_for(
+    identity,
+    source_lang: str | None = None,
+    global_terms=None,
+    have_names: bool = False,
+) -> list[str]:
+    """Terminology lines to inject for this show **in this source language**.
+
+    Terms are stored per language (`terms: {fr: {...}, vi: {...}}`) so a Vietnamese
+    run never receives French spellings. AniList names are Japanese-only and are
+    folded in only for Japanese sources, and only when the caller has no character
+    map of its own (otherwise they arrive through that block).
+    """
+    data = ensure_for_identity(identity) if identity is not None else {}
+    if not data:
+        return list(global_terms or [])
+
+    lang = normalize_lang(source_lang)
+    merged: dict[str, str] = {}
+    for source, target in ((data.get("terms") or {}).get(lang) or {}).items():
+        if source and target:
+            merged[str(source)] = str(target)
+    if lang == "ja" and not have_names:
+        for native, target in (data.get("names") or {}).items():
+            if native and target:
+                merged.setdefault(str(native), str(target))
+    return [f"{source} = {target}" for source, target in merged.items()]
 
 
 def key_for(identity) -> str | None:
@@ -151,32 +208,12 @@ def ensure_for_identity(identity) -> dict:
                 names[native] = full
                 changed = True
         data.setdefault("terms", {})
+        if _migrate_terms(data):
+            changed = True
         if changed:
             data["updated"] = _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
             save(key, data)
         return data
-
-
-def terms_for(identity, global_terms=None, have_names: bool = False) -> list[str]:
-    """Terminology lines to inject into the prompt for this show.
-
-    * identified show  → its own terms; names only when the caller has no character
-      map (otherwise they arrive through that block and would be duplicated)
-    * unknown show      → the global fallback list
-    """
-    data = ensure_for_identity(identity) if identity is not None else {}
-    if not data:
-        return list(global_terms or [])
-
-    merged: dict[str, str] = {}
-    for native, target in (data.get("terms") or {}).items():
-        if native and target:
-            merged[str(native)] = str(target)
-    if not have_names:
-        for native, target in (data.get("names") or {}).items():
-            if native and target:
-                merged.setdefault(str(native), str(target))
-    return [f"{native} = {target}" for native, target in merged.items()]
 
 
 def describe(key: str | None) -> str:

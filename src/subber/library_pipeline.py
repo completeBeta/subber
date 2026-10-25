@@ -985,14 +985,11 @@ async def _translate_and_sync(
     # show deliberately does NOT inherit the global list — that is how one show's
     # names used to leak into every other show.
     from . import show_glossary
-    glossary_terms = (
-        show_glossary.terms_for(
-            identity,
-            global_terms=ts.get("glossary") or [],
-            have_names=bool(character_map),
-        )
-        if show_glossary.is_japanese_source(source_lang)
-        else []
+    glossary_terms = show_glossary.terms_for(
+        identity,
+        source_lang=source_lang,
+        global_terms=ts.get("glossary") or [],
+        have_names=bool(character_map),
     )
 
     # Try backends in priority order

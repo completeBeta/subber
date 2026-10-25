@@ -2,6 +2,34 @@
 
 All notable changes to Subber are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/), and this project versions with [SemVer](https://semver.org/).
 
+## [0.11.7] - 2026-10-25
+
+### Added
+- **Per-show glossaries and term learning now work for any source language.** Most
+  sources Subber sees are French, Chinese or Vietnamese, not Japanese. Candidates are
+  katakana/kanji for Japanese, Han sub-compounds for Chinese, and capitalised
+  mid-sentence words and phrases for Latin-script sources. Terms are stored **per
+  language** (`terms: {vi: …}`, `terms: {fr: …}`) so a Vietnamese run never receives
+  French spellings; older flat glossary files migrate automatically.
+
+### Fixed
+- Latin-script candidate extraction treated `đợi` as a capitalised name, because
+  Unicode ranges like `Ā-ſ` also contain lowercase letters. Capitalisation is now
+  judged with `str.isupper()`, all-caps sign/title text ("FINAL BOSS APPEARS") is
+  skipped, and a name must appear mid-sentence at least once so a word that only ever
+  starts a line ("Đây") is not learned.
+- Fragment pruning: a shorter candidate is dropped when a longer, nearly-as-frequent
+  one contains it as whole words ("Ma"/"Vương" inside "Ma Thần Vương"). Chinese names
+  are found by scoring every 2-4 character sub-run instead of only the maximal run.
+
+### Measured
+- Vietnamese episode (337 cues): `Learned 5 term(s) … Lufas = Lufas, Dina = Dina,
+  Trấn Áp = Suppression, Midgard = Midgard, Exgate Online = Exgate Online`, stored
+  under `vi` and injected on the next run.
+- Three-episode Vietnamese A/B: the model was already consistent without a glossary
+  (Lufas 39/42 cues, Dina 17/17, Midgard 4/4), so the glossary changed nothing
+  measurable there. The mechanism works; the gain appears where names actually drift.
+
 ## [0.11.6] - 2026-10-25
 
 ### Fixed

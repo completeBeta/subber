@@ -69,7 +69,7 @@ def test_terms_for_identified_show_excludes_global_list(store):
     show_glossary.ensure_for_identity(ident)
 
     terms = show_glossary.terms_for(
-        ident, global_terms=["魔女教 = Witch Cult"], have_names=True
+        ident, "ja", global_terms=["魔女教 = Witch Cult"], have_names=True
     )
     # names arrive through the character map, so only show terms (none yet) appear
     assert terms == []
@@ -79,25 +79,25 @@ def test_terms_for_folds_names_when_no_character_map(store):
     ident = _identity(anilist_id=7, characters=[{"native": "リア", "full": "Lia"}])
     show_glossary.ensure_for_identity(ident)
 
-    terms = show_glossary.terms_for(ident, global_terms=["魔女教 = Witch Cult"], have_names=False)
+    terms = show_glossary.terms_for(ident, "ja", global_terms=["魔女教 = Witch Cult"], have_names=False)
     assert terms == ["リア = Lia"]
 
 
 def test_terms_for_unknown_show_falls_back_to_global(store):
-    assert show_glossary.terms_for(None, global_terms=["魔女教 = Witch Cult"]) == [
+    assert show_glossary.terms_for(None, "ja", global_terms=["魔女教 = Witch Cult"]) == [
         "魔女教 = Witch Cult"
     ]
-    assert show_glossary.terms_for(_identity(parsed_title="Unmatched"), global_terms=["a = b"]) == ["a = b"]
+    assert show_glossary.terms_for(_identity(parsed_title="Unmatched"), "ja", global_terms=["a = b"]) == ["a = b"]
 
 
 def test_stored_terms_are_injected(store):
     ident = _identity(anilist_id=9)
     show_glossary.ensure_for_identity(ident)
     data = show_glossary.load("anilist-9")
-    data["terms"] = {"福音書": "Gospel"}
+    data["terms"] = {"ja": {"福音書": "Gospel"}}
     show_glossary.save("anilist-9", data)
 
-    assert show_glossary.terms_for(ident, have_names=True) == ["福音書 = Gospel"]
+    assert show_glossary.terms_for(ident, "ja", have_names=True) == ["福音書 = Gospel"]
 
 
 def test_describe_summarises_for_logs(store):

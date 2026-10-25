@@ -26,14 +26,14 @@ def _filler(n):
 # ── candidate extraction ────────────────────────────────────────────────
 
 def test_candidates_pick_katakana_and_kanji():
-    found = term_mining._candidates("（ミミ）リベンジだ！ 魔女教の連中め")
+    found = term_mining._candidates("（ミミ）リベンジだ！ 魔女教の連中め", "ja")
     assert "リベンジ" in found
     assert "ミミ" in found
     assert "魔女教" in found
 
 
 def test_candidates_skip_common_words():
-    assert term_mining._candidates("今日は本当に大丈夫です") == set()
+    assert term_mining._candidates("今日は本当に大丈夫です", "ja") == set()
 
 
 # ── scoring ─────────────────────────────────────────────────────────────
@@ -149,12 +149,12 @@ def test_learn_writes_terms_into_the_show_glossary(store):
     ]
     entries, translated = _pairs(*rows)
 
-    result = term_mining.learn("anilist-11", entries, translated, {"cues": len(rows)})
+    result = term_mining.learn("anilist-11", entries, translated, {"cues": len(rows)}, "ja")
     assert any("リベンジ" in a for a in result["added"])
 
     data = show_glossary.load("anilist-11")
-    assert data["terms"]["リベンジ"] == "Revenger Blade"
-    assert data["term_stats"]["リベンジ"]["n"] == 4
+    assert data["terms"]["ja"]["リベンジ"] == "Revenger Blade"
+    assert data["term_stats"]["ja"]["リベンジ"]["n"] == 4
 
 
 def test_learn_keeps_existing_term_and_reports_conflict(store):
@@ -170,9 +170,9 @@ def test_learn_keeps_existing_term_and_reports_conflict(store):
         ("魔女教を見ろ", "Watch the Witch Coven."),
     ]
     entries, translated = _pairs(*rows)
-    result = term_mining.learn("anilist-12", entries, translated, {"cues": len(rows)})
+    result = term_mining.learn("anilist-12", entries, translated, {"cues": len(rows)}, "ja")
 
-    assert show_glossary.load("anilist-12")["terms"]["魔女教"] == "Witch Cult"  # never overwritten
+    assert show_glossary.load("anilist-12")["terms"]["ja"]["魔女教"] == "Witch Cult"  # never overwritten
     assert any("魔女教" in c for c in result["conflicts"])
 
 
@@ -186,13 +186,13 @@ def test_learn_refuses_a_file_that_translated_badly(store):
     qa = {"cues": len(rows), "empty": 4, "untranslated": 2}  # 25% failures
     result = term_mining.learn("anilist-13", entries, translated, qa)
     assert result["added"] == []
-    assert show_glossary.load("anilist-13").get("terms") == {}
+    assert show_glossary.load("anilist-13").get("terms", {}).get("ja") in (None, {})
 
 
 def test_learn_caps_the_glossary(store):
     show_glossary.ensure_for_identity(_ident(14))
     data = show_glossary.load("anilist-14")
-    data["terms"] = {f"既存{i}": f"Existing{i}" for i in range(term_mining.MAX_TERMS)}
+    data["terms"] = {"ja": {f"既存{i}": f"Existing{i}" for i in range(term_mining.MAX_TERMS)}}
     show_glossary.save("anilist-14", data)
 
     rows = _filler(20) + [
@@ -202,9 +202,9 @@ def test_learn_caps_the_glossary(store):
         ("リベンジ", "Revenger Blade!"),
     ]
     entries, translated = _pairs(*rows)
-    result = term_mining.learn("anilist-14", entries, translated, {"cues": len(rows)})
+    result = term_mining.learn("anilist-14", entries, translated, {"cues": len(rows)}, "ja")
     assert result["added"] == []
-    assert len(show_glossary.load("anilist-14")["terms"]) == term_mining.MAX_TERMS
+    assert len(show_glossary.load("anilist-14")["terms"]["ja"]) == term_mining.MAX_TERMS
 
 
 def test_nickname_fragment_of_a_known_name_is_not_learned(store):
@@ -222,9 +222,9 @@ def test_nickname_fragment_of_a_known_name_is_not_learned(store):
         ("リアを見ろ", "Watch Rem Witch."),
     ]
     entries, translated = _pairs(*rows)
-    result = term_mining.learn("anilist-16", entries, translated, {"cues": len(rows)})
+    result = term_mining.learn("anilist-16", entries, translated, {"cues": len(rows)}, "ja")
 
-    assert "リア" not in show_glossary.load("anilist-16")["terms"]
+    assert "リア" not in (show_glossary.load("anilist-16")["terms"].get("ja") or {})
     assert any("リア" in s for s in result["skipped"])
 
 
@@ -288,7 +288,7 @@ def test_learning_is_skipped_for_a_non_japanese_source(store, tmp_path):
     with mock.patch.object(translator, "_call_api", side_effect=fake_api):
         translator.translate(srt, tmp_path / "out.srt", "vi", "en")
 
-    assert show_glossary.load("anilist-21").get("terms") == {}
+    assert show_glossary.load("anilist-21").get("terms", {}).get("vi") in (None, {})
 
 
 def test_translation_teaches_the_show_glossary(store, tmp_path):
@@ -322,7 +322,7 @@ def test_translation_teaches_the_show_glossary(store, tmp_path):
         translator.translate(srt, tmp_path / "out.srt", "ja", "en")
 
     data = show_glossary.load("anilist-15")
-    assert data["terms"].get("リベンジ") == "Revenger Blade"
+    assert (data["terms"].get("ja") or {}).get("リベンジ") == "Revenger Blade"
     assert translator.last_qa.get("terms_learned", 0) >= 1
 
 
@@ -338,3 +338,89 @@ def _ident(anilist_id):
         parsed_title=None,
         characters=[{"native": "エミリア", "full": "Emilia"}],
     )
+
+
+# ── non-Japanese sources ────────────────────────────────────────────────
+
+def test_learns_a_name_from_a_vietnamese_source():
+    """Most sources Subber sees are Vietnamese/French, not Japanese."""
+    rows = [
+        ("Đây là một câu bình thường", f"Just an ordinary line number {i}")
+        for i in range(20)
+    ] + [
+        ("Ngài Lufas đã đến", "Lord Lufas has arrived."),
+        ("Lufas rất mạnh", "Lufas is very strong."),
+        ("Chúng ta theo Lufas", "We follow Lufas."),
+        ("Lufas là vua", "Lufas is the king."),
+    ]
+    entries, translated = _pairs(*rows)
+    mined = term_mining.mine_terms(entries, translated, "vi")
+    assert mined["Lufas"]["target"] == "Lufas"
+
+
+def test_learns_a_name_from_a_french_source():
+    rows = [
+        ("C'est une phrase ordinaire", f"Just an ordinary line number {i}")
+        for i in range(20)
+    ] + [
+        ("Lufas est arrivé", "Lufas has arrived."),
+        ("Lufas est fort", "Lufas is strong."),
+        ("Nous suivons Lufas", "We follow Lufas."),
+        ("Lufas est le roi", "Lufas is king."),
+    ]
+    entries, translated = _pairs(*rows)
+    mined = term_mining.mine_terms(entries, translated, "fr")
+    assert mined["Lufas"]["target"] == "Lufas"
+
+
+def test_french_function_words_are_not_learned():
+    rows = [("Je pense que oui", "I think so") for _ in range(20)]
+    entries, translated = _pairs(*rows)
+    mined = term_mining.mine_terms(entries, translated, "fr")
+    assert "Je" not in mined
+
+
+def test_learns_a_term_from_a_chinese_source():
+    rows = [
+        ("这是一句普通的话", f"Just an ordinary line number {i}")
+        for i in range(20)
+    ] + [
+        ("鲁法斯来了", "Lufas has arrived."),
+        ("鲁法斯很强", "Lufas is strong."),
+        ("我们跟随鲁法斯", "We follow Lufas."),
+        ("鲁法斯是王", "Lufas is the king."),
+    ]
+    entries, translated = _pairs(*rows)
+    mined = term_mining.mine_terms(entries, translated, "zh")
+    assert mined["鲁法斯"]["target"] == "Lufas"
+
+
+def test_terms_are_stored_per_language(store):
+    ident = _ident(30)
+    show_glossary.ensure_for_identity(ident)
+    rows = [
+        ("Đây là một câu bình thường", f"Just an ordinary line number {i}")
+        for i in range(20)
+    ] + [
+        ("Ngài Lufas đã đến", "Lord Lufas has arrived."),
+        ("Lufas rất mạnh", "Lufas is very strong."),
+        ("Chúng ta theo Lufas", "We follow Lufas."),
+        ("Lufas là vua", "Lufas is the king."),
+    ]
+    entries, translated = _pairs(*rows)
+    term_mining.learn("anilist-30", entries, translated, {"cues": len(rows)}, "vi")
+
+    data = show_glossary.load("anilist-30")
+    assert "Lufas" in data["terms"]["vi"]
+    assert not data["terms"].get("ja")           # no cross-language leakage
+    assert show_glossary.terms_for(ident, "vi") == ["Lufas = Lufas"]
+    assert show_glossary.terms_for(ident, "fr") == []
+
+
+def test_flat_glossary_files_migrate_to_per_language(store):
+    path = store / "anilist-31.yaml"
+    store.mkdir(parents=True, exist_ok=True)
+    path.write_text("title: Old\nterms:\n  魔女教: Witch Cult\n", encoding="utf-8")
+
+    data = show_glossary.ensure_for_identity(_ident(31))
+    assert data["terms"] == {"ja": {"魔女教": "Witch Cult"}}

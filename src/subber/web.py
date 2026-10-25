@@ -2037,24 +2037,21 @@ async def _run_translation(job_id: str) -> None:
 
         _character_map = getattr(_identity, "characters", None) or None
         from . import show_glossary
-        _ja_source = show_glossary.is_japanese_source(job.source_lang)
-        _glossary_terms = (
-            show_glossary.terms_for(
-                _identity,
-                global_terms=_ts.get("glossary") or [],
-                have_names=bool(_character_map),
-            )
-            if _ja_source
-            else []
+        _glossary_terms = show_glossary.terms_for(
+            _identity,
+            source_lang=job.source_lang,
+            global_terms=_ts.get("glossary") or [],
+            have_names=bool(_character_map),
         )
-        _key = show_glossary.key_for(_identity) if _ja_source else None
+        _key = show_glossary.key_for(_identity)
         if _key:
             _log.info("  Show: %s", show_glossary.describe(_key))
-            _log.info("  Glossary: %d term(s) for this show", len(_glossary_terms))
+            _log.info(
+                "  Glossary: %d term(s) for this show (%s)",
+                len(_glossary_terms), show_glossary.normalize_lang(job.source_lang),
+            )
         elif _glossary_terms:
             _log.info("  Glossary: %d global term(s) (show not identified)", len(_glossary_terms))
-        elif not _ja_source:
-            _log.info("  Glossary: skipped (source language %s is not Japanese)", job.source_lang)
 
         translator = _get_translator(_glossary_terms, _key)
 
