@@ -2,6 +2,26 @@
 
 All notable changes to Subber are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/), and this project versions with [SemVer](https://semver.org/).
 
+## [0.11.8] - 2026-10-25
+
+### Added
+- **Thai sources.** Thai has no spaces and no capitalisation, so neither words nor
+  capitalised tokens exist to anchor on. Candidates are character n-grams of four or
+  more characters, scored the same way as Han sub-runs. On a real episode it learned
+  `มาโตอิ → Matoi`, `มาโกะ → Mako`, `กามา → Gamagoori`, `Satsuki Kiryuuin`,
+  `Ryuuko-chan`. Caveat: keys are character slices, not words, so a few entries are
+  fragments (`โรงเรีย` for โรงเรียน, "school") — usable, not tidy.
+- **French validated on a real file** (1,337-cue film): 17 terms, all character names
+  (`Koro-sensei`, `Nagisa`, `Karma`, `Karasuma`, `Kanzaki`, `Kayano`, `Takaoka`,
+  `Ritsu`, `Irina`, `Terre`…), no vocabulary.
+
+### Fixed
+- **A capital at the start of a line is no longer evidence of a name.** Subtitle lines
+  are short, so every noun gets capitalised at the start ("Gloves are off."), which let
+  vocabulary into the glossary (`ชุด → suit`, `นวม → gloves`). Names must now be
+  capitalised *mid-line*; multi-word phrases may qualify on overall capitalisation.
+- Greetings and interjections (Hé, Bonjour, Ouah, Présent) are never terminology.
+
 ## [0.11.7] - 2026-10-25
 
 ### Added

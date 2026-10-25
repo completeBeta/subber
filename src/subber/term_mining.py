@@ -42,6 +42,8 @@ _HAN_RUN = re.compile(r"[一-龥々]{2,}")
 _LATIN_WORD = re.compile(r"[^\W\d_][\w'’\-]{1,}", re.UNICODE)
 _HAS_KANA = re.compile(r"[ぁ-んァ-ヶ]")
 _HAS_HAN = re.compile(r"[一-龥]")
+_HAS_THAI = re.compile(r"[\u0e00-\u0e7f]")
+_THAI_RUN = re.compile(r"[\u0e00-\u0e7f]{4,}")
 
 # English tokens carry the evidence; function words never do.
 _EN_TOKEN = re.compile(r"[A-Za-z][A-Za-z'’\-]{2,}")
@@ -66,6 +68,10 @@ _EN_STOP = {
     "about", "around", "through", "against", "toward", "towards", "upon",
     "near", "off", "out", "down", "back", "away", "again", "still", "even",
     "only", "other", "another", "every", "each", "both", "more", "most",
+    # greetings and interjections: capitalised in every language, names in none
+    "hey", "hi", "hello", "wow", "whoa", "huh", "hah", "haha", "hehe", "hmm",
+    "jeez", "damn", "god", "present", "bye", "goodbye", "morning", "evening",
+    "goodnight", "bitch", "sir", "madam", "ma'am", "mister", "miss",
 }
 
 # Super-common Japanese words that would otherwise be mined as "terms"; kept in
@@ -115,12 +121,14 @@ MIN_TARGET_WORDS_JA = 2
 
 
 def script_of(text: str, source_lang: str | None = None) -> str:
-    """'ja', 'zh' or 'latin' — which candidate rules apply."""
+    """'ja', 'zh', 'thai' or 'latin' — which candidate rules apply."""
     lang = show_glossary.normalize_lang(source_lang)
     if lang == "ja" or _HAS_KANA.search(text):
         return "ja"
     if lang == "zh" or _HAS_HAN.search(text):
         return "zh"
+    if lang == "th" or _HAS_THAI.search(text):
+        return "thai"
     return "latin"
 
 
@@ -179,6 +187,23 @@ def _latin_candidates(text: str) -> set[str]:
     return found
 
 
+def _thai_candidates(text: str) -> set[str]:
+    """Character n-grams of a Thai run.
+
+    Thai has no spaces and no capitalisation, so neither words nor "capitalised"
+    tokens exist to anchor on. Names still repeat verbatim, so character n-grams
+    are scored the same way Han sub-runs are. Four characters is the floor: shorter
+    n-grams are particles and honorifics (-จัง), which would poison the glossary
+    ("จัง" would be forced to render as one specific character's nickname).
+    """
+    found: set[str] = set()
+    for run in _THAI_RUN.findall(text):
+        for size in range(4, min(7, len(run)) + 1):
+            for i in range(len(run) - size + 1):
+                found.add(run[i : i + size])
+    return found
+
+
 def _candidates(text: str, script: str) -> set[str]:
     """Term candidates in one source cue."""
     found: set[str] = set()
@@ -194,6 +219,8 @@ def _candidates(text: str, script: str) -> set[str]:
         }
     elif script == "zh":
         found |= _han_candidates(text)
+    elif script == "thai":
+        found |= _thai_candidates(text)
     else:
         found |= _latin_candidates(text)
     return found
@@ -222,6 +249,25 @@ def _ngrams(tokens: list[tuple[str, str]], size: int) -> list[str]:
     ]
 
 
+def _midline_case_ratio(target: str, lines: list[str]) -> float:
+    """Capitalisation ratio counting only occurrences that don't start a line.
+
+    Short subtitle lines make every noun look capitalised ("Gloves are off."), so
+    a line-initial capital is no evidence of a name. A word that is lowercase in
+    running text ("…my gloves") is vocabulary.
+    """
+    pattern = re.compile(rf"(?<!\w){re.escape(target)}(?!\w)")
+    capitalised = total = 0
+    for line in lines:
+        for match in pattern.finditer(line):
+            if match.start() == 0:
+                continue
+            total += 1
+            if match.group(0)[:1].isupper():
+                capitalised += 1
+    return capitalised / total if total else 0.0
+
+
 def _case_ratio(target: str, all_text: str) -> float:
     """How often the target appears capitalised, i.e. as a name."""
     pattern = re.escape(target)
@@ -238,7 +284,8 @@ def mine_terms(
     """Return {source_term: {target, n, score, consistency}} for one file."""
     source_text = " ".join(e["text"] for e in entries)
     script = script_of(source_text, source_lang)
-    all_text = " ".join((translated.get(e["index"]) or "") for e in entries)
+    translated_lines = [(translated.get(e["index"]) or "") for e in entries]
+    all_text = " ".join(translated_lines)
 
     pairs: list[tuple[set[str], list[str]]] = []
     for entry in entries:
@@ -291,6 +338,10 @@ def mine_terms(
             min_consistency = MIN_CONSISTENCY if katakana else MIN_CONSISTENCY_KANJI
             if not katakana and n < MIN_OCCURRENCES_KANJI:
                 continue
+        elif script == "thai":
+            if n < 4:
+                continue
+            min_consistency = 0.6
         else:
             min_consistency = MIN_CONSISTENCY
         if script == "latin" and source_case.get(term, 0.0) < MIN_SOURCE_CASE_RATIO:
@@ -367,9 +418,18 @@ def mine_terms(
 
         # Only proper nouns: a target that mostly appears lowercase in running text
         # is vocabulary, not terminology.
-        required = MIN_CASE_RATIO if script == "ja" else MIN_CASE_RATIO_STRICT
-        if _case_ratio(best["target"], all_text) < required:
-            continue
+        if script == "ja":
+            if _case_ratio(best["target"], all_text) < MIN_CASE_RATIO:
+                continue
+        else:
+            # Latin/Thai: a name has to be capitalised *mid-line*. Multi-word phrases
+            # are strong enough that overall capitalisation is accepted instead.
+            midline = _midline_case_ratio(best["target"], translated_lines)
+            if len(best["target"].split()) >= 2:
+                if _case_ratio(best["target"], all_text) < 0.8 and midline < 0.4:
+                    continue
+            elif midline < 0.5:
+                continue
         if script == "ja" and len(best["target"].split()) < MIN_TARGET_WORDS_JA:
             continue
         results[term] = best
@@ -394,7 +454,10 @@ def mine_terms(
         for shorter in ordered[i + 1 :]:
             if shorter in drop or len(shorter.split()) >= len(longer.split()):
                 continue
-            if not re.search(rf"(?<!\w){re.escape(shorter)}(?!\w)", longer):
+            if script in ("zh", "thai"):
+                if shorter not in longer:
+                    continue
+            elif not re.search(rf"(?<!\w){re.escape(shorter)}(?!\w)", longer):
                 continue
             if freq[longer] >= 0.5 * freq[shorter]:
                 drop.add(shorter)
