@@ -2,6 +2,15 @@
 
 All notable changes to Subber are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/), and this project versions with [SemVer](https://semver.org/).
 
+## [0.12.1] - 2026-10-28
+
+### Fixed
+- **The "Hide season packs" toggle rendered as a stretched checkbox with a
+  three-line label.** It sat inside a `.form-group`, where the global
+  `.form-group label` / `.form-group input { width: 100% }` rules apply — so the
+  checkbox took the full row and the text wrapped into a narrow column. It now uses
+  the existing `.checkbox-label` style, outside the form-group rules.
+
 ## [0.12.0] - 2026-10-28
 
 ### Added

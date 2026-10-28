@@ -32,12 +32,12 @@
         <div class="hint" style="margin-bottom: 0.4rem;">Optional — narrows TV results to an exact episode.</div>
     </div>
 
-    <div class="form-group" style="margin-top: 0.75rem;">
-        <label style="display: inline-flex; align-items: center; gap: 0.45rem; cursor: pointer;">
+    <div style="margin-top: 0.75rem;">
+        <label class="checkbox-label" for="search-hide-packs" style="margin-bottom: 0;">
             <input type="checkbox" id="search-hide-packs" onchange="setHidePacks(this.checked)">
-            <span>Hide season packs</span>
+            <span style="white-space: nowrap;">Hide season packs</span>
         </label>
-        <div class="hint">Packs are grouped last by default. Ticking this drops them from the result list (it stays ticked for this browser).</div>
+        <div class="hint" style="margin-top: 0.25rem;">Packs are grouped last by default. Ticking this drops them from the result list (it stays ticked for this browser).</div>
     </div>
 
     <div id="search-results" style="margin-top: 1.5rem;"></div>
