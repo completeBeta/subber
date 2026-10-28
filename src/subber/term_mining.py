@@ -126,6 +126,10 @@ MIN_SOURCE_CASE_RATIO = 0.75  # Latin-script candidates: capitalised nearly alwa
 MIN_MID_SENTENCE = 1          # …and seen at least once away from a line start
 MIN_TARGET_WORDS_JA = 2
 
+# Scripts with no spaces between words: candidate keys are character n-grams, so
+# fragment detection has to count characters, not words.
+_NO_SPACE_SCRIPTS = ("zh", "thai")
+
 
 def script_of(text: str, source_lang: str | None = None) -> str:
     """'ja', 'zh', 'thai' or 'latin' — which candidate rules apply."""
@@ -459,25 +463,72 @@ def mine_terms(
     # Drop fragments: "Ma" and "Vương" are pieces of "Ma Thần Vương", and a piece is
     # never the term. A shorter candidate is dropped when a longer, nearly-as-frequent
     # candidate contains it as whole words.
+    #
+    # Thai and Chinese have no spaces, so every candidate there counts as "one word"
+    # and the word-count comparison below was always 1 >= 1 — it dropped nothing, and
+    # slivers like "โรงเรีย" (from "โรงเรียน") survived as keys. For those scripts the
+    # comparison has to be in characters.
     freq = {c: len(v) for c, v in containing.items()}
-    ordered = sorted(freq, key=lambda t: len(t.split()), reverse=True)
+    spaceless = script in _NO_SPACE_SCRIPTS
+    ordered = sorted(
+        freq, key=lambda t: (len(t.split()), len(t)), reverse=True
+    ) if spaceless else sorted(freq, key=lambda t: len(t.split()), reverse=True)
     drop: set[str] = set()
     for i, longer in enumerate(ordered):
         for shorter in ordered[i + 1 :]:
-            if shorter in drop or len(shorter.split()) >= len(longer.split()):
+            if shorter in drop:
                 continue
-            if script in ("zh", "thai", "nocase"):
-                if shorter not in longer:
+            if spaceless:
+                if len(shorter) >= len(longer) or shorter not in longer:
                     continue
-            elif not re.search(rf"(?<!\w){re.escape(shorter)}(?!\w)", longer):
-                continue
+            else:
+                if len(shorter.split()) >= len(longer.split()):
+                    continue
+                if not re.search(rf"(?<!\w){re.escape(shorter)}(?!\w)", longer):
+                    continue
             if freq[longer] >= 0.5 * freq[shorter]:
                 drop.add(shorter)
+
+    # Stronger evidence, for the no-space scripts: a key whose every occurrence in
+    # this episode sits INSIDE a longer key was never seen on its own, so it is a
+    # fragment regardless of frequency.
+    if spaceless:
+        cue_texts = [e["text"] for e in entries]
+        keys = [t for t in results if t in keep and t not in drop]
+        for short in keys:
+            for long in keys:
+                if short == long or short not in long:
+                    continue
+                if not _related_targets(results[short]["target"], results[long]["target"]):
+                    continue
+                n_short = sum(1 for t in cue_texts if short in t)
+                n_both = sum(1 for t in cue_texts if short in t and long in t)
+                if n_short and n_both == n_short:
+                    drop.add(short)
+                    break
+
     return {
         term: info
         for term, info in results.items()
         if term in keep and term not in drop
     }
+
+
+def _related_targets(a: str, b: str) -> bool:
+    """True when two English renderings are the same phrase at different lengths.
+
+    A fragment key and the full key it was cut from render to the same thing
+    ("โรงเรีย"/"โรงเรียน" → "School"/"the school"). Two genuinely different terms
+    that happen to share a substring do not, and must not be pruned against each
+    other.
+    """
+    def _norm(text: str) -> str:
+        return re.sub(r"^(?:the|a|an)\s+", "", (text or "").strip().lower())
+
+    a, b = _norm(a), _norm(b)
+    if not a or not b:
+        return False
+    return a == b or a in b or b in a
 
 
 def is_name_fragment(term: str, names: dict[str, str]) -> bool:
@@ -510,7 +561,8 @@ def learn(
     "source = target" strings. Nothing is learned from a file whose translation
     failed in more than a few places, because bad pairs make bad terms.
     """
-    empty = {"added": [], "kept": [], "conflicts": [], "skipped": [], "awaiting": []}
+    empty = {"added": [], "kept": [], "conflicts": [], "skipped": [], "awaiting": [],
+             "pruned": []}
     if not key:
         return empty
     qa = qa or {}
@@ -524,8 +576,6 @@ def learn(
         return empty  # nothing to learn from translating English into English
 
     mined = mine_terms(entries, translated, source_lang)
-    if not mined:
-        return empty
 
     data = show_glossary.load(key) or {}
     show_glossary._migrate_terms(data)
@@ -549,6 +599,39 @@ def learn(
         str(k): dict(v) for k, v in pending_all.items() if isinstance(v, dict)
     }
     pending: dict[str, dict] = lang_pending.setdefault(lang, {})
+
+    # Prune fragment keys that were stored before the miner could reject them.
+    # Thai and Chinese keys are character n-grams, so a 4-character sliver of a
+    # longer name ("โรงเรีย" inside "โรงเรียน") used to be stored as its own entry —
+    # and a fragment key is brittle: it matches inside other words too. The
+    # episode's source text is the evidence: a stored key that never appears
+    # outside a longer stored key was never actually seen on its own.
+    pruned: list[str] = []
+    script_here = script_of(" ".join(e["text"] for e in entries), source_lang)
+    if script_here in _NO_SPACE_SCRIPTS:
+        cue_texts = [e["text"] for e in entries]
+
+        def _fragment(short: str, keys, targets: dict[str, str]) -> bool:
+            for long in keys:
+                if long == short or short not in long:
+                    continue
+                if not _related_targets(str(targets.get(short, "")),
+                                        str(targets.get(long, ""))):
+                    continue
+                n_short = sum(1 for t in cue_texts if short in t)
+                n_both = sum(1 for t in cue_texts if short in t and long in t)
+                if n_short and n_both == n_short:
+                    return True
+            return False
+
+        term_targets = dict(terms)
+        pending_targets = {k: str(v.get("target", "")) for k, v in pending.items()}
+        for store, targets in ((terms, term_targets), (pending, pending_targets)):
+            for short in list(store):
+                if _fragment(short, list(store), targets):
+                    store.pop(short, None)
+                    lang_stats.pop(short, None)
+                    pruned.append(short)
 
     added, kept, conflicts, skipped, awaiting = [], [], [], [], []
     ranked = sorted(mined.items(), key=lambda kv: (kv[1]["score"], kv[1]["n"]), reverse=True)
@@ -599,26 +682,21 @@ def learn(
         pending.pop(next(iter(pending)))
 
     # Write state first: candidates have to survive to the next episode even when
-    # nothing was trusted this time.
+    # nothing was trusted this time — and a pruned fragment has to be *removed*
+    # from disk, not just from this run's dict.
     by_lang[lang] = terms
     data["terms"] = by_lang
     lang_pending[lang] = pending
     data["pending"] = lang_pending
     data["term_stats"] = stats
 
-    if not added and not conflicts and not awaiting:
-        return {"added": [], "kept": kept, "conflicts": [], "skipped": skipped, "awaiting": []}
-    if not added and not conflicts:
-        import datetime as _dt
-
-        data["updated"] = _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
-        show_glossary.save(key, data)
-        return {"added": [], "kept": kept, "conflicts": [], "skipped": skipped,
-                "awaiting": awaiting}
+    result = {"added": added, "kept": kept, "conflicts": conflicts,
+              "skipped": skipped, "awaiting": awaiting, "pruned": pruned}
+    if not (added or conflicts or awaiting or pruned):
+        return result
 
     import datetime as _dt
 
     data["updated"] = _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
     show_glossary.save(key, data)
-    return {"added": added, "kept": kept, "conflicts": conflicts,
-            "skipped": skipped, "awaiting": awaiting}
+    return result

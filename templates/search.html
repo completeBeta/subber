@@ -32,13 +32,104 @@
         <div class="hint" style="margin-bottom: 0.4rem;">Optional — narrows TV results to an exact episode.</div>
     </div>
 
+    <div class="form-group" style="margin-top: 0.75rem;">
+        <label style="display: inline-flex; align-items: center; gap: 0.45rem; cursor: pointer;">
+            <input type="checkbox" id="search-hide-packs" onchange="setHidePacks(this.checked)">
+            <span>Hide season packs</span>
+        </label>
+        <div class="hint">Packs are grouped last by default. Ticking this drops them from the result list (it stays ticked for this browser).</div>
+    </div>
+
     <div id="search-results" style="margin-top: 1.5rem;"></div>
 </section>
 {% endblock %}
 {% block scripts %}
 <script>
 const API_KEY = '{{ api_key }}';
+const HIDE_PACKS_KEY = 'subber.search.hidePacks';
 let lastResults = [];
+let lastProviders = [];
+
+// "Hide season packs" is a viewing preference, so it lives in this browser rather
+// than in the server config: default off (packs still listed, grouped last).
+function hidePacksEnabled() {
+    const box = document.getElementById('search-hide-packs');
+    return !!(box && box.checked);
+}
+
+function setHidePacks(on) {
+    const box = document.getElementById('search-hide-packs');
+    if (!box) return;
+    box.checked = !!on;
+    try { localStorage.setItem(HIDE_PACKS_KEY, on ? '1' : '0'); } catch (e) {}
+    renderResults();
+}
+
+function esc(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => (
+        {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]
+    ));
+}
+
+// One row: readable show name, a chip for the episode/pack, provider facts, then
+// the raw release name (clamped, never allowed to overlap).
+function rowHtml(r, i) {
+    const badges = [];
+    if (r.label) badges.push(
+        `<span class="badge ${r.is_pack ? 'badge-pack' : 'badge-ep'}">${esc(r.label)}</span>`);
+    badges.push(`<span class="badge">${esc((r.language || '?').toUpperCase())}</span>`);
+    if (r.provider) badges.push(`<span class="badge">${esc(r.provider)}</span>`);
+    if (r.quality) badges.push(`<span class="badge">${esc(r.quality)}</span>`);
+    if (r.downloads) badges.push(`<span class="badge">${Number(r.downloads).toLocaleString()} downloads</span>`);
+    if (r.rating) badges.push(`<span class="badge">★ ${Number(r.rating).toFixed(1)}</span>`);
+    if (r.hearing_impaired) badges.push('<span class="badge">HI</span>');
+    const raw = (r.release_info && r.release_info !== r.filename)
+        ? `${r.filename} · ${r.release_info}` : (r.filename || '');
+    return `
+    <div class="result-item">
+        <div class="result-main">
+            <div class="result-title" title="${esc(r.show || r.filename || '')}">${esc(r.show || r.filename || 'Unknown')}</div>
+            <div class="result-badges">${badges.join('')}</div>
+            <div class="result-source" title="${esc(raw)}">${esc(raw)}</div>
+        </div>
+        <button class="btn-save" onclick="downloadSub(${i}, this)">Download</button>
+    </div>`;
+}
+
+function renderResults() {
+    const resultsDiv = document.getElementById('search-results');
+    if (!lastResults.length) return;
+
+    // The index into lastResults is the download handle, so filtering must keep
+    // using the ORIGINAL index — never the filtered position.
+    const rows = lastResults
+        .map((r, i) => ({ r, i }))
+        .filter(({ r }) => !(hidePacksEnabled() && r.is_pack));
+    const episodes = rows.filter(({ r }) => !r.is_pack);
+    const packs = rows.filter(({ r }) => r.is_pack);
+    const split = episodes.length > 0 && packs.length > 0;
+
+    let html = `<p class="result-count">${rows.length} result(s)` +
+        (hidePacksEnabled() ? ` · ${lastResults.length - rows.length} pack(s) hidden` : '') +
+        ` · Providers: ` +
+        `${esc((lastProviders || []).join(', '))}` +
+        (split ? ` · ${episodes.length} episode${episodes.length === 1 ? '' : 's'}, ` +
+                 `${packs.length} pack${packs.length === 1 ? '' : 's'}` : '') + `</p>`;
+
+    if (!rows.length) {
+        html += '<p style="color: var(--text-muted)">No single-episode results' +
+            (lastResults.length ? ' — untick “Hide season packs” to see the packs.' : '.') + '</p>';
+    }
+    if (episodes.length) {
+        if (split) html += `<h3 class="result-group">Single episodes <span>${episodes.length}</span></h3>`;
+        html += episodes.map(({ r, i }) => rowHtml(r, i)).join('');
+    }
+    if (packs.length) {
+        if (split) html += `<h3 class="result-group">Season packs <span>${packs.length}</span></h3>`;
+        html += packs.map(({ r, i }) => rowHtml(r, i)).join('');
+    }
+    resultsDiv.innerHTML = html;
+}
 
 async function doSearch() {
     const input = document.getElementById('search-query').value.trim();
@@ -69,64 +160,26 @@ async function doSearch() {
         const data = await resp.json();
         if (data.error) throw new Error(data.error);
 
-        if (data.results.length === 0) {
+        lastResults = data.results || [];
+        lastProviders = data.providers_searched || [];
+
+        if (lastResults.length === 0) {
             resultsDiv.innerHTML = '<p style="color: var(--text-muted)">No results found.</p>';
             return;
         }
 
-        lastResults = data.results;
-
-        const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => (
-            {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]
-        ));
-
-        // One row: readable show name, a chip for the episode/pack, provider
-        // facts, then the raw release name (clamped, never allowed to overlap).
-        const rowHtml = (r, i) => {
-            const badges = [];
-            if (r.label) badges.push(
-                `<span class="badge ${r.is_pack ? 'badge-pack' : 'badge-ep'}">${esc(r.label)}</span>`);
-            badges.push(`<span class="badge">${esc((r.language || '?').toUpperCase())}</span>`);
-            if (r.provider) badges.push(`<span class="badge">${esc(r.provider)}</span>`);
-            if (r.quality) badges.push(`<span class="badge">${esc(r.quality)}</span>`);
-            if (r.downloads) badges.push(`<span class="badge">${Number(r.downloads).toLocaleString()} downloads</span>`);
-            if (r.rating) badges.push(`<span class="badge">★ ${Number(r.rating).toFixed(1)}</span>`);
-            if (r.hearing_impaired) badges.push('<span class="badge">HI</span>');
-            const raw = (r.release_info && r.release_info !== r.filename)
-                ? `${r.filename} · ${r.release_info}` : (r.filename || '');
-            return `
-            <div class="result-item">
-                <div class="result-main">
-                    <div class="result-title" title="${esc(r.show || r.filename || '')}">${esc(r.show || r.filename || 'Unknown')}</div>
-                    <div class="result-badges">${badges.join('')}</div>
-                    <div class="result-source" title="${esc(raw)}">${esc(raw)}</div>
-                </div>
-                <button class="btn-save" onclick="downloadSub(${i}, this)">Download</button>
-            </div>`;
-        };
-
-        const episodes = data.results.filter(r => !r.is_pack);
-        const packs = data.results.filter(r => r.is_pack);
-        const split = episodes.length > 0 && packs.length > 0;
-
-        let html = `<p class="result-count">${data.results.length} result(s) · Providers: ` +
-            `${esc((data.providers_searched || []).join(', '))}` +
-            (split ? ` · ${episodes.length} episode${episodes.length === 1 ? '' : 's'}, ` +
-                     `${packs.length} pack${packs.length === 1 ? '' : 's'}` : '') + `</p>`;
-
-        if (episodes.length) {
-            if (split) html += `<h3 class="result-group">Single episodes <span>${episodes.length}</span></h3>`;
-            html += episodes.map(r => rowHtml(r, lastResults.indexOf(r))).join('');
-        }
-        if (packs.length) {
-            if (split) html += `<h3 class="result-group">Season packs <span>${packs.length}</span></h3>`;
-            html += packs.map(r => rowHtml(r, lastResults.indexOf(r))).join('');
-        }
-        resultsDiv.innerHTML = html;
+        renderResults();
     } catch (e) {
         resultsDiv.innerHTML = '<span style="color: var(--error)">✗ ' + e.message + '</span>';
     }
 }
+
+// Restore the pack filter for this browser (default: off, packs visible).
+try {
+    const saved = localStorage.getItem(HIDE_PACKS_KEY);
+    const box = document.getElementById('search-hide-packs');
+    if (box && saved === '1') box.checked = true;
+} catch (e) {}
 
 async function downloadSub(idx, btn) {
     const r = lastResults[idx];

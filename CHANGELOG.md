@@ -2,6 +2,52 @@
 
 All notable changes to Subber are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/), and this project versions with [SemVer](https://semver.org/).
 
+## [0.12.0] - 2026-10-28
+
+### Added
+- **"Hide season packs" on the Search tab.** Packs are still grouped last by default;
+  the new checkbox drops them from the results without re-running the search, and
+  remembers the choice per browser (localStorage — it is a viewing preference, not
+  server config). The result count says how many packs are hidden.
+- **One-cue desync detection for files without speaker labels.** A model that merges
+  two cues into one line and splits another keeps the line count intact while every
+  later cue runs one out of step. That was only detectable through SDH speaker labels
+  before; now numbers, question marks and glossary terms act as anchors. A region is
+  repaired only when shifting it by one cue explains at least two more anchors than
+  the current alignment, each cue is then re-translated on its own, and a replacement
+  is kept only if it satisfies that cue's own anchors. New QA counters on every run:
+  `anchor_desyncs` (windows detected) and `anchor_repaired` (cues replaced).
+
+### Changed
+- **Recommended translation chain is now Hy-MT2 30B-A3B → Llama 3.1 8B → DeepSeek**
+  (was Llama → DeepSeek). Hy-MT2 is a translation-specialist MoE that applies the
+  terminology list verbatim. `config.example.yaml` and the README document the chain
+  and the trade-off: it follows a glossary closely and will not invent a rendering for
+  a term left off the list, so the auto-learned per-show glossary matters more.
+- **The library pipeline now uses the same failover wrapper as the Translate tab.**
+  Backend fallback used to be implemented twice with opposite semantics (see Fixed).
+
+### Fixed
+- **A total backend failure silently looked like success.** `MultiBackendTranslator`
+  returned the model name `"none"` when every backend failed — the caller wrote an
+  untranslated file, recorded a model called "none", and the `RuntimeError` below the
+  return was unreachable dead code. It now raises with every backend's error message.
+- **A cancelled translation could be reported as a backend failure.** The cancel
+  exception is now re-raised before it is recorded, so the chain never fails over past
+  a user's cancellation.
+- **Library translations could not be cancelled mid-file.** The library's hand-rolled
+  backend loop passed no `cancel_check` and no `on_progress`: cancellation was only
+  tested between files, a long file was indistinguishable from a hung one, and its
+  bare `except Exception` would have swallowed `TranslationCancelled`. It now goes
+  through `MultiBackendTranslator` with both callbacks wired, and logs progress every
+  10% of a file (`[LIBRARY] Translating …: chunk N/M`).
+- **Thai and Chinese glossary keys could be fragments of a longer word.** Those scripts
+  have no spaces, so every candidate counted as "one word" and the fragment check
+  compared 1 against 1 — it pruned nothing, and a sliver like `โรงเรีย` was stored as
+  its own key alongside `โรงเรียน`. Fragment comparison is now in characters, and a
+  stored key is pruned when it never appears outside a longer stored key with a
+  matching rendering. Two different terms that merely share a substring are left alone.
+
 ## [0.11.11] - 2026-10-25
 
 ### Changed

@@ -24,25 +24,31 @@ translation:
   backends:
     # Provider-agnostic: `name` is a free-form label; the actual model is
     # determined by `api_base` + `model`. Any OpenAI-compatible API works.
-    # Recommended: OpenRouter + Llama 3.1 8B (~$1 for hundreds of episodes).
-    - name: Example Provider
+    # When this list is non-empty it OVERRIDES the top-level model/api_base above,
+    # and the entries are tried in order with automatic failover.
+    # Recommended chain: Hy-MT2 30B-A3B (translation-specialist MoE, applies a
+    # glossary verbatim) → Llama 3.1 8B → DeepSeek. Costs are per `cost.models`.
+    - name: Hy-MT2 30B-A3B (OpenRouter)
       api_base: https://openrouter.ai/api/v1
-      api_key: ""                    # Your API key for the provider above
-      model: meta-llama/llama-3.1-8b-instruct
+      api_key: ""                    # Your OpenRouter key
+      model: tencent/hy-mt2-30b-a3b
       priority: 0
-    # Add more backends for automatic fallback. Uncomment and adjust:
-    # DeepSeek:
-    #   - name: DeepSeek
-    #     api_base: https://api.deepseek.com/v1
-    #     api_key: ""                # Your DeepSeek API key
-    #     model: deepseek-v4-flash
-    #     priority: 1
-    # Local Ollama (no key needed):
+    - name: Llama 3.1 8B (OpenRouter)
+      api_base: https://openrouter.ai/api/v1
+      api_key: ""                    # Your OpenRouter key
+      model: meta-llama/llama-3.1-8b-instruct
+      priority: 1
+    - name: DeepSeek V4 Flash
+      api_base: https://api.deepseek.com/v1
+      api_key: ""                    # Your DeepSeek API key
+      model: deepseek-v4-flash
+      priority: 2
+    # Local Ollama is free and needs no key — add it as a last resort:
     #   - name: Ollama (local)
     #     api_base: http://localhost:11434/v1
     #     api_key: ""
     #     model: llama3.2:3b
-    #     priority: 2
+    #     priority: 3
 
 # --- Subtitle Sync ---
 sync:

@@ -196,6 +196,22 @@ class Translator:
                 dialogue_fixed,
             )
 
+        # Files without SDH speaker labels had no defence at all against a
+        # compensating merge (two cues as one line, another split, count intact).
+        # Numbers, questions and glossary terms survive translation, so a region
+        # where shifting by one cue explains more of them than the current
+        # alignment is shifted — re-translate it one line at a time.
+        anchor_windows, anchor_fixed = self._repair_anchor_desync(
+            entries, translated, source_lang, target_lang
+        )
+        if anchor_windows:
+            import logging
+            logging.getLogger("subber").warning(
+                "  Repaired %d cue(s) across %d anchor-detected one-cue shift(s) "
+                "(no speaker labels to anchor on)",
+                anchor_fixed, anchor_windows,
+            )
+
         # Retry any entries still in the source language — the LLM can omit line
         # numbers (duplicate/hallucinated segments) or pass source text straight
         # through (e.g. a truncated response on a huge vocalization chunk),
@@ -223,17 +239,19 @@ class Translator:
             "chunks_repaired": repairs,
             "label_desyncs": repaired_cues,
             "dialogue_repaired": dialogue_fixed,
+            "anchor_desyncs": anchor_windows,
+            "anchor_repaired": anchor_fixed,
             "chunks": len(chunks),
         })
         import logging
         logging.getLogger("subber").info(
             "  QA: %d cues · %d empty · %d label-only · %d sound-cue-only · "
             "%d untranslated · longest %d chars · %d/%d chunks repaired · "
-            "%d label-drift · %d dialogue",
+            "%d label-drift · %d dialogue · %d anchor-shift (%d cues)",
             self.last_qa["cues"], self.last_qa["empty"], self.last_qa["label_only"],
             self.last_qa["sound_cues"], self.last_qa["untranslated"],
             self.last_qa["longest_line"], repairs, len(chunks), repaired_cues,
-            dialogue_fixed,
+            dialogue_fixed, anchor_windows, anchor_fixed,
         )
 
         # Learn this show's terminology from the pairs we just produced, so the
@@ -264,6 +282,13 @@ class Translator:
                     logging.getLogger("subber").warning(
                         "  Glossary conflict(s) kept as-is: %s",
                         "; ".join(learned["conflicts"][:5]),
+                    )
+                if learned.get("pruned"):
+                    import logging
+                    logging.getLogger("subber").warning(
+                        "  Pruned %d fragment glossary key(s) that only ever "
+                        "appeared inside a longer term: %s",
+                        len(learned["pruned"]), ", ".join(learned["pruned"][:6]),
                     )
             except Exception as exc:  # never fail a translation over learning
                 import logging
@@ -392,6 +417,118 @@ class Translator:
                     fixed += 1
 
         return fixed
+
+    # ── anchor-based shift detection (files with no speaker labels) ──────────
+    MAX_ANCHOR_REPAIRS = 80     # cues re-translated per file, cost guard
+    MIN_ANCHOR_FACTS = 4        # too few anchors in the file → don't guess
+
+    def _repair_anchor_desync(
+        self,
+        entries: list[dict],
+        translated: dict[int, str],
+        source_lang: str,
+        target_lang: str,
+    ) -> tuple[int, int]:
+        """Detect and repair a one-cue shift in files that have no speaker labels.
+
+        A model that merges two cues into one and splits another keeps the line
+        count intact while the content runs one cue out of step from the merge
+        point on. `_repair_label_desync` catches that only when the source has
+        SDH speaker labels to anchor on; without labels nothing detected it.
+
+        Anchors that survive translation are the substitute: a cue containing a
+        number must keep that number, a cue containing "?" must still ask a
+        question after translation, and a cue containing a glossary term must
+        still carry that term's rendering. If shifting the translations by one
+        cue explains at least two more anchors than the current alignment, the
+        region is shifted, and every cue in it is re-translated on its own (a
+        single-line request cannot merge two lines).
+
+        Returns (windows_detected, cues_replaced). Repairs are only kept when the
+        single-line result satisfies that cue's own anchors, so a mis-detected
+        shift costs API calls, never a worse subtitle.
+        """
+        pairs = _glossary_pairs(getattr(self, "glossary", None))
+        facts = {e["index"]: _anchor_facts(e["text"], pairs) for e in entries}
+        if sum(len(f) for f in facts.values()) < self.MIN_ANCHOR_FACTS:
+            return 0, 0
+
+        violated = [
+            e["index"] for e in entries
+            if facts[e["index"]]
+            and not all(_fact_ok(f, translated.get(e["index"]) or "") for f in facts[e["index"]])
+        ]
+        if not violated:
+            return 0, 0
+
+        # Only the contiguous neighbourhood of a violation is a candidate region.
+        windows: list[list[int]] = []
+        cur = [violated[0]]
+        for i in violated[1:]:
+            if i - cur[-1] <= 4:
+                cur.append(i)
+            else:
+                windows.append(cur)
+                cur = [i]
+        windows.append(cur)
+
+        by_index = {e["index"]: e for e in entries}
+        last_index = len(entries) - 1
+        repaired = 0
+        detected = 0
+
+        for window in windows:
+            lo = max(0, window[0] - 3)
+            hi = min(last_index, window[-1] + 3)
+            region = [i for i in range(lo, hi + 1) if i in by_index]
+            region_facts = sum(len(facts[i]) for i in region)
+            if region_facts < 2:
+                continue  # one anchor is not evidence of anything
+
+            def _local(offset: int) -> int:
+                hits = 0
+                for i in region:
+                    text = translated.get(i + offset) or ""
+                    for fact in facts[i]:
+                        if _fact_ok(fact, text):
+                            hits += 1
+                return hits
+
+            base = _local(0)
+            # +1 = the translation lags its source (content sits one cue late),
+            # -1 = it leads. Either way the fix is the same: re-translate.
+            if max(_local(1), _local(-1)) - base < 2:
+                continue
+            detected += 1
+
+            for i in region:
+                if repaired >= self.MAX_ANCHOR_REPAIRS:
+                    import logging
+                    logging.getLogger("subber").warning(
+                        "  Anchor-shift repair stopped at the %d-cue cap",
+                        self.MAX_ANCHOR_REPAIRS,
+                    )
+                    return detected, repaired
+                e = by_index[i]
+                try:
+                    raw = self._translate_chunk(
+                        [e], source_lang, target_lang, temperature=0.0
+                    )
+                    got = _parse_numbered_response(raw)
+                    text = (got.get(i) or next(iter(got.values()), "")).strip()
+                except TranslationCancelled:
+                    raise
+                except Exception:
+                    continue
+                if not text or _EN_LABEL_RE.fullmatch(text):
+                    continue
+                if facts[i] and not all(_fact_ok(f, text) for f in facts[i]):
+                    continue  # still doesn't carry this cue's anchors — keep original
+                if text != (translated.get(i) or ""):
+                    translated[i] = text
+                    repaired += 1
+
+        return detected, repaired
 
     def _translate_chunk(
         self,
@@ -612,6 +749,9 @@ class MultiBackendTranslator:
         self.shared_kwargs = shared_kwargs
         self._translators: dict[str, Translator] = {}
         self.last_qa: dict = {}
+        # Per-backend failure messages from the last translate() call (empty when
+        # it succeeded). Kept so a caller can report *why* the chain gave up.
+        self.last_errors: list[str] = []
 
     @property
     def chunk_size(self) -> int:
@@ -674,16 +814,26 @@ class MultiBackendTranslator:
                         name, i,
                     )
                 return model
+            except TranslationCancelled:
+                # A cancel is a decision, not a backend failure — never fail over
+                # past it (the old code appended it to `errors` first and only
+                # then re-raised, which is how a cancelled library file could
+                # look like "the backend broke").
+                raise
             except Exception as e:
                 _log.warning(
                     "  Backend %s (%s) failed: %s", name, model, e,
                 )
                 errors.append(f"{name}: {e}")
-                if isinstance(e, TranslationCancelled):
-                    raise
                 continue
 
-        return "none"
+        # Every backend failed: say so. This used to `return "none"` — so a total
+        # failure looked exactly like a success, the caller wrote an untranslated
+        # file and reported a model literally named "none", and the RuntimeError
+        # below was dead code that could never run.
+        self.last_errors = errors
+        if not self.backends:
+            raise RuntimeError("No translation backends configured")
         raise RuntimeError(
             f"All {len(self.backends)} translation backends failed:\n" +
             "\n".join(errors)
@@ -774,6 +924,65 @@ def _labels_mismatch(chunk: list[dict], parsed: dict[int, str]) -> int:
         if bool(_JP_LABEL_RE.match(e["text"].strip())) != bool(_EN_LABEL_RE.match(text.strip())):
             bad += 1
     return bad
+
+
+# ── Anchors for detecting a one-cue shift in files without speaker labels ────
+
+_DIGITS_RE = re.compile(r"\d+")
+
+
+def _glossary_pairs(glossary) -> list[tuple[str, str]]:
+    """Parse a glossary into (source, target) pairs, whatever shape it arrived in."""
+    pairs: list[tuple[str, str]] = []
+    for entry in glossary or []:
+        if isinstance(entry, dict):
+            src = str(entry.get("source") or entry.get("term") or "").strip()
+            dst = str(entry.get("target") or entry.get("translation") or "").strip()
+        else:
+            raw = str(entry)
+            src = dst = ""
+            for sep in _GLOSSARY_SEPARATORS:
+                if sep in raw:
+                    left, _, right = raw.partition(sep)
+                    src, dst = left.strip(), right.strip()
+                    break
+        if src and dst:
+            pairs.append((src, dst))
+    return pairs
+
+
+def _anchor_facts(text: str, pairs: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Facts a faithful translation of this cue should still satisfy.
+
+    Only signals that survive translation unchanged are used: an unambiguous
+    number, the fact that the line is a question, and a listed glossary term.
+    Everything else (word order, length, punctuation other than "?") is
+    legitimately rewritten by a translator, so it cannot anchor anything.
+    """
+    text = text or ""
+    facts: list[tuple[str, str]] = []
+    numbers = set(_DIGITS_RE.findall(text))
+    if len(numbers) == 1:  # two different numbers would make the check ambiguous
+        facts.append(("num", numbers.pop()))
+    if "?" in text or "？" in text:
+        facts.append(("q", ""))
+    for src, dst in pairs:
+        if src and src in text:
+            facts.append(("term", dst))
+    return facts
+
+
+def _fact_ok(fact: tuple[str, str], text: str) -> bool:
+    """Is `fact` still true of the translation `text`?"""
+    kind, value = fact
+    text = text or ""
+    if kind == "num":
+        return value in text
+    if kind == "q":
+        return "?" in text or "？" in text
+    if kind == "term":
+        return value.lower() in text.lower()
+    return True
 # Accepted separators in a glossary entry: "リア = Lia", "リア->Lia", "リア\tLia".
 _GLOSSARY_SEPARATORS = (" = ", "=", " -> ", "->", "\t")
 

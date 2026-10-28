@@ -2,7 +2,7 @@
 
 **Subtitle grabber, sync, and translator — Docker + Web UI.**
 
-Upload a video, Subber finds subtitles across 5 providers, syncs them with ffsubsync, and translates non-English subs using **OpenRouter Llama 3.1 8B** (recommended — fast, cheap, accurate) with DeepSeek or Ollama as fallbacks. If no subtitle exists at all, it can transcribe the audio track itself via a self-hosted Whisper server. Or scan your entire media library and Subber handles everything automatically.
+Upload a video, Subber finds subtitles across 5 providers, syncs them with ffsubsync, and translates non-English subs using **Hy-MT2 30B-A3B via OpenRouter** (recommended — a translation-specialist MoE that applies your terminology verbatim) with Llama 3.1 8B and DeepSeek as fallbacks. If no subtitle exists at all, it can transcribe the audio track itself via a self-hosted Whisper server. Or scan your entire media library and Subber handles everything automatically.
 
 ## 📸 Screenshots
 
@@ -44,8 +44,8 @@ cp docker-compose.example.yml docker-compose.yml
 ### 2. Edit your config
 
 **`config/config.yaml`** — add your API keys (all optional, but recommended):
-- `translation.backends[0].api_key` — OpenRouter API key (for translation, recommend Llama 3.1 8B ~$1 to translate hundreds of episodes)
-- `translation.backends[1+]` — DeepSeek, Ollama, or any OpenAI-compatible fallback
+- `translation.backends[0].api_key` — OpenRouter API key (for translation — Hy-MT2 30B-A3B first, Llama 3.1 8B second; ~$1 to translate hundreds of episodes)
+- `translation.backends[1+]` — Llama 3.1 8B, DeepSeek, Ollama, or any OpenAI-compatible fallback
 - `providers.subdl.api_key` — free from [subdl.com](https://subdl.com)
 - `providers.opensubtitles` — see [OpenSubtitles Setup](#-opensubtitles-setup) below
 
@@ -297,10 +297,13 @@ Subber uses a multi-backend translator with automatic fallback. **Recommended se
 
 ```yaml
 backends:
-  - name: OpenRouter Llama 3.1 8B
+  - name: Hy-MT2 30B-A3B (OpenRouter)
+    api_base: https://openrouter.ai/api/v1
+    model: tencent/hy-mt2-30b-a3b
+  - name: Llama 3.1 8B (secondary)
     api_base: https://openrouter.ai/api/v1
     model: meta-llama/llama-3.1-8b-instruct
-  - name: DeepSeek V4 Flash (fallback)
+  - name: DeepSeek V4 Flash (tertiary)
     api_base: https://api.deepseek.com/v1
     model: deepseek-v4-flash
   - name: Ollama (local)
@@ -308,7 +311,17 @@ backends:
     model: llama3.2:3b
 ```
 
-OpenRouter Llama 3.1 8B costs ~$1 to translate **hundreds** of episodes — far cheaper than DeepSeek and better at subtitle-format adherence. Works with any OpenAI-compatible API — cloud or local.
+Entries are tried in order and the first one that returns a usable file wins; if a
+backend errors, the next is used and the run says so in the log
+(`Translation succeeded via fallback backend …`). If **every** backend fails the run
+fails loudly — it does not silently write an untranslated file.
+
+**Hy-MT2 30B-A3B** is a translation-specialist MoE: it applies the terminology list
+verbatim, which is why it is first. The trade-off is that it follows the glossary
+closely and will not invent a rendering for a term you left off the list, so a show's
+auto-learned glossary matters more with it. **Llama 3.1 8B** is the fast, cheap
+generalist (~$1 to translate hundreds of episodes). **DeepSeek** is the paid tertiary
+fallback. Any OpenAI-compatible API works — cloud or local.
 
 ## 📺 Show Identification
 

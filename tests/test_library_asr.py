@@ -33,7 +33,8 @@ def test_foreign_audio_is_translated_with_whisper_language(tmp_path, monkeypatch
 
     captured = {}
 
-    async def fake_translate_and_sync(video_path, sub_path, drift_threshold_ms, source_lang=None):
+    async def fake_translate_and_sync(video_path, sub_path, drift_threshold_ms,
+                                    source_lang=None, scan_id=None):
         captured["source_lang"] = source_lang
         captured["sub_path"] = str(sub_path)
         out = video_path.with_suffix(".en.srt")
@@ -60,7 +61,8 @@ def test_korean_audio_is_translated(tmp_path, monkeypatch):
     video.write_bytes(b"x")
     captured = {}
 
-    async def fake_translate_and_sync(video_path, sub_path, drift_threshold_ms, source_lang=None):
+    async def fake_translate_and_sync(video_path, sub_path, drift_threshold_ms,
+                                    source_lang=None, scan_id=None):
         captured["source_lang"] = source_lang
         out = video_path.with_suffix(".en.srt")
         out.write_text("1\n00:00:00,000 --> 00:00:02,000\nHello\n", encoding="utf-8")

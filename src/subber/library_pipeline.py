@@ -478,7 +478,7 @@ async def _process_file(record: dict, scan_id: int, drift_threshold_ms: int) -> 
                         sub_path.unlink(missing_ok=True)
                     except OSError:
                         pass
-                    provider_result = await _search_download_and_process(file_path, record, drift_threshold_ms)
+                    provider_result = await _search_download_and_process(file_path, record, drift_threshold_ms, scan_id)
                     if provider_result.get("success"):
                         cost = provider_result.get("cost", 0)
                         library_db.update_file_status(
@@ -512,7 +512,7 @@ async def _process_file(record: dict, scan_id: int, drift_threshold_ms: int) -> 
         elif sub_status == "external_foreign":
             # Has non-English external subtitle — try providers first, then translate
             print(f"[LIBRARY] external_foreign: trying providers for {file_path.name}", flush=True)
-            provider_result = await _search_download_and_process(file_path, record, drift_threshold_ms)
+            provider_result = await _search_download_and_process(file_path, record, drift_threshold_ms, scan_id)
             if provider_result.get("success"):
                 cost = provider_result.get("cost", 0)
                 library_db.update_file_status(
@@ -536,7 +536,7 @@ async def _process_file(record: dict, scan_id: int, drift_threshold_ms: int) -> 
                             error_message="Foreign subtitle has no spoken dialogue",
                         )
                     else:
-                        result = await _translate_and_sync(file_path, to_translate, drift_threshold_ms)
+                        result = await _translate_and_sync(file_path, to_translate, drift_threshold_ms, scan_id=scan_id)
                         if to_translate != foreign_sub:
                             try:
                                 to_translate.unlink(missing_ok=True)
@@ -559,7 +559,7 @@ async def _process_file(record: dict, scan_id: int, drift_threshold_ms: int) -> 
         elif sub_status == "embedded_foreign":
             # Has non-English embedded track — try providers first, then extract+translate
             print(f"[LIBRARY] embedded_foreign: trying providers for {file_path.name}", flush=True)
-            provider_result = await _search_download_and_process(file_path, record, drift_threshold_ms)
+            provider_result = await _search_download_and_process(file_path, record, drift_threshold_ms, scan_id)
             if provider_result.get("success"):
                 cost = provider_result.get("cost", 0)
                 library_db.update_file_status(
@@ -586,7 +586,7 @@ async def _process_file(record: dict, scan_id: int, drift_threshold_ms: int) -> 
                             error_message="Embedded foreign subtitle has no spoken dialogue",
                         )
                     else:
-                        result = await _translate_and_sync(file_path, to_translate, drift_threshold_ms)
+                        result = await _translate_and_sync(file_path, to_translate, drift_threshold_ms, scan_id=scan_id)
                         if to_translate != sub_path:
                             try:
                                 to_translate.unlink(missing_ok=True)
@@ -610,9 +610,9 @@ async def _process_file(record: dict, scan_id: int, drift_threshold_ms: int) -> 
 
         elif sub_status == "none":
             # No subtitles at all — search providers, then try ASR fallback
-            result = await _search_download_and_process(file_path, record, drift_threshold_ms)
+            result = await _search_download_and_process(file_path, record, drift_threshold_ms, scan_id)
             if not result.get("success"):
-                asr_result = await _try_asr_fallback(file_path, drift_threshold_ms)
+                asr_result = await _try_asr_fallback(file_path, drift_threshold_ms, scan_id)
                 if asr_result is not None:
                     result = asr_result
             cost = result.get("cost", 0)
@@ -914,8 +914,12 @@ async def _translate_and_sync(
     sub_path: Path,
     drift_threshold_ms: int,
     source_lang: str | None = None,
+    scan_id: int | None = None,
 ) -> dict:
     """Translate a foreign subtitle to English and optionally sync.
+
+    `scan_id` lets the translation notice a cancel/pause from the UI mid-file
+    (without it, a library file once started could not be stopped).
 
     Returns {"output_path": str, "model_used": str, "cost": float, "drift_ms": int?}
     """
@@ -992,61 +996,71 @@ async def _translate_and_sync(
         have_names=bool(character_map),
     )
 
-    # Try backends in priority order
-    last_error = None
-    for backend in backends:
-        try:
-            translator = Translator(
-                api_base=backend["api_base"],
-                api_key=backend.get("api_key", ""),
-                model=backend["model"],
-                chunk_size=chunk_size,
-                max_retries=max_retries,
-                glossary=glossary_terms,
-                wrap_chars=ts.get("wrap_chars", 42),
-                glossary_key=show_glossary.key_for(identity),
+    # Try backends in priority order — through the SAME failover wrapper the
+    # interactive Translate tab uses. The hand-rolled loop this replaces passed no
+    # on_progress and no cancel_check, so a library file could not be stopped once
+    # it started translating (cancellation was only tested between files), and its
+    # bare `except Exception` would have swallowed a TranslationCancelled as if a
+    # backend had failed. One wrapper, one set of semantics, both paths.
+    from .translator import MultiBackendTranslator
+
+    multi = MultiBackendTranslator(
+        backends=backends,
+        chunk_size=chunk_size,
+        max_retries=max_retries,
+        temperature=ts.get("temperature", 0.1),
+        max_tokens=ts.get("max_tokens", 4096),
+        timeout=ts.get("timeout", 120),
+        glossary=glossary_terms,
+        wrap_chars=ts.get("wrap_chars", 42),
+        glossary_key=show_glossary.key_for(identity),
+    )
+    cancel_check = (lambda: _is_cancelled(scan_id)) if scan_id is not None else None
+
+    def _on_progress(chunk: int, total: int) -> None:
+        # Visible in the container log so a long file is distinguishable from a
+        # hung one (the old library path logged nothing between start and finish).
+        if total and (chunk == 1 or chunk == total or chunk % max(1, total // 10) == 0):
+            print(
+                f"[LIBRARY] Translating {sanitize_log(sub_path.name)}: chunk "
+                f"{chunk}/{total}",
+                flush=True,
             )
 
-            def _do_translate():
-                translator.translate(
-                    input_path=sub_path,
-                    output_path=output_path,
-                    source_lang=source_lang,
-                    target_lang="en",
-                    character_map=character_map,
-                )
-                # Add attribution header
-                _add_attribution(output_path, backend["model"])
-                return backend["model"]
+    def _do_translate() -> str:
+        return multi.translate(
+            input_path=sub_path,
+            output_path=output_path,
+            source_lang=source_lang,
+            target_lang="en",
+            on_progress=_on_progress,
+            cancel_check=cancel_check,
+            character_map=character_map,
+        )
 
-            model_used = await loop.run_in_executor(None, _do_translate)
+    model_used = await loop.run_in_executor(None, _do_translate)
+    # Add attribution header
+    _add_attribution(output_path, model_used)
 
-            # Sync after translation
-            drift_ms = None
-            try:
-                async with _SYNC_SEMAPHORE:
-                    preview = await async_sync_preview(video_path, output_path)
-                    drift_ms = int(abs(preview.offset_seconds) * 1000)
-                    if drift_ms > drift_threshold_ms:
-                        tmp_path = output_path.with_suffix(".synced.srt")
-                        await async_sync_apply(video_path, output_path, tmp_path)
-                        output_path = _replace_with_synced(output_path, tmp_path)
-            except Exception as e:
-                print(f"[LIBRARY] Sync failed: {e}", flush=True)
+    # Sync after translation
+    drift_ms = None
+    try:
+        async with _SYNC_SEMAPHORE:
+            preview = await async_sync_preview(video_path, output_path)
+            drift_ms = int(abs(preview.offset_seconds) * 1000)
+            if drift_ms > drift_threshold_ms:
+                tmp_path = output_path.with_suffix(".synced.srt")
+                await async_sync_apply(video_path, output_path, tmp_path)
+                output_path = _replace_with_synced(output_path, tmp_path)
+    except Exception as e:
+        print(f"[LIBRARY] Sync failed: {e}", flush=True)
 
-            return {
-                "output_path": str(output_path),
-                "model_used": model_used,
-                "cost": _estimate_cost(sub_path, backend["model"]),
-                "drift_ms": drift_ms,
-            }
-
-        except Exception as e:
-            last_error = e
-            logger.warning("Translation backend %s failed: %s", backend.get("name"), e)
-            continue
-
-    raise RuntimeError(f"All translation backends failed: {last_error}")
+    return {
+        "output_path": str(output_path),
+        "model_used": model_used,
+        "cost": _estimate_cost(sub_path, model_used),
+        "drift_ms": drift_ms,
+    }
 
 
 def _has_usable_dialogue(sub_path: Path) -> bool:
@@ -1249,7 +1263,7 @@ async def _confirm_language(sub_path: Path) -> str:
     return "unknown"
 
 
-async def _asr_transcribe(file_path: Path, drift_threshold_ms: int) -> dict:
+async def _asr_transcribe(file_path: Path, drift_threshold_ms: int, scan_id: int | None = None) -> dict:
     """Transcribe a video's audio via ASR (library fallback). Assumes the caller
     already confirmed ASR is enabled + configured. Returns a result dict like
     _search_download_and_process."""
@@ -1296,6 +1310,7 @@ async def _asr_transcribe(file_path: Path, drift_threshold_ms: int) -> dict:
         try:
             trans = await _translate_and_sync(
                 file_path, raw_srt, drift_threshold_ms, source_lang=detected,
+                scan_id=scan_id,
             )
             try:
                 raw_srt.unlink(missing_ok=True)
@@ -1348,7 +1363,7 @@ async def _asr_transcribe(file_path: Path, drift_threshold_ms: int) -> dict:
     }
 
 
-async def _try_asr_fallback(file_path: Path, drift_threshold_ms: int) -> dict | None:
+async def _try_asr_fallback(file_path: Path, drift_threshold_ms: int, scan_id: int | None = None) -> dict | None:
     """Transcribe audio via ASR when no subtitle exists. Returns a result dict,
     or None when ASR is disabled (library.asr_fallback off) or unconfigured."""
     lib_cfg = subber_config.get_section("library") or {}
@@ -1358,7 +1373,7 @@ async def _try_asr_fallback(file_path: Path, drift_threshold_ms: int) -> dict | 
     if asr_cfg.get("mode", "off") != "auto" or not asr_cfg.get("backends"):
         return None
     try:
-        return await _asr_transcribe(file_path, drift_threshold_ms)
+        return await _asr_transcribe(file_path, drift_threshold_ms, scan_id)
     except Exception as e:
         logger.warning(
             "[LIBRARY] ASR fallback failed for %s: %s",
@@ -1433,6 +1448,7 @@ async def _search_download_and_process(
     video_path: Path,
     record: dict,
     drift_threshold_ms: int,
+    scan_id: int | None = None,
 ) -> dict:
     """Search providers for subtitles, download, translate if needed, sync.
 
@@ -1647,7 +1663,7 @@ async def _search_download_and_process(
         }
     else:
         # Non-English sub — translate then sync
-        result = await _translate_and_sync(video_path, downloaded_path, drift_threshold_ms)
+        result = await _translate_and_sync(video_path, downloaded_path, drift_threshold_ms, scan_id=scan_id)
         # Clean up downloaded file
         try:
             downloaded_path.unlink(missing_ok=True)
