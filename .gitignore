@@ -28,7 +28,9 @@ Thumbs.db
 .env
 .env.local
 data/
-config/config.yaml
+# Whole directory: config/config.yaml holds API keys, config/glossary/*.yaml holds
+# the per-show term lists, and config.yaml.bak-* backups hold the keys again.
+config/
 .hermes/
 docker-compose.yml
 uploads-test/
