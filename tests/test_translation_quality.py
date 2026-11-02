@@ -77,9 +77,9 @@ def test_chunk_retried_when_line_count_mismatches():
         "[0] A\n[1] B\n[2] C",   # retry is complete
     ])
     with mock.patch.object(t, "_translate_chunk", side_effect=lambda *a, **k: next(responses)):
-        parsed, repaired = t._translate_chunk_verified(chunk, "ja", "en")
+        parsed, reason = t._translate_chunk_verified(chunk, "ja", "en")
 
-    assert repaired is True
+    assert reason and "1 missing" in reason   # names the real defect, not "count mismatch"
     assert parsed == {0: "A", 1: "B", 2: "C"}
 
 
@@ -87,9 +87,9 @@ def test_chunk_not_retried_when_complete():
     t = Translator(api_key="x", model="m", chunk_size=50)
     chunk = [{"index": 0, "text": "a"}, {"index": 1, "text": "b"}]
     with mock.patch.object(t, "_translate_chunk", return_value="[0] A\n[1] B") as m:
-        parsed, repaired = t._translate_chunk_verified(chunk, "ja", "en")
+        parsed, reason = t._translate_chunk_verified(chunk, "ja", "en")
 
-    assert repaired is False
+    assert reason == ""
     assert parsed == {0: "A", 1: "B"}
     assert m.call_count == 1
 
@@ -100,9 +100,9 @@ def test_chunk_falls_back_to_per_line_translation():
     # Both whole-chunk attempts drop [1]; the single-line pass rescues it.
     responses = iter(["[0] A", "[0] A", "[1] B"])
     with mock.patch.object(t, "_translate_chunk", side_effect=lambda *a, **k: next(responses)):
-        parsed, repaired = t._translate_chunk_verified(chunk, "ja", "en")
+        parsed, reason = t._translate_chunk_verified(chunk, "ja", "en")
 
-    assert repaired is True
+    assert reason and "1 missing" in reason
     assert parsed == {0: "A", 1: "B"}
 
 
@@ -138,9 +138,9 @@ def test_chunk_retried_when_labels_shift():
         "[0] And that's how you get a devout cultist.\n[1] (Subaru) What a sketchy story.",  # clean
     ])
     with mock.patch.object(t, "_translate_chunk", side_effect=lambda *a, **k: next(responses)):
-        parsed, repaired = t._translate_chunk_verified(chunk, "ja", "en")
+        parsed, reason = t._translate_chunk_verified(chunk, "ja", "en")
 
-    assert repaired is True
+    assert reason and "speaker-label drift" in reason
     assert parsed[0] == "And that's how you get a devout cultist."
 
 

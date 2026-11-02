@@ -146,9 +146,24 @@ class Translator:
         if not entries:
             raise ValueError("No subtitle entries found in file")
 
-        chunks = _chunk_entries(entries, self.chunk_size, self.chunk_overlap)
-        translated: dict[int, str] = {}
+        # Typeset tracks pad their event count: one sign animated over 40 frames is 40
+        # events carrying the same string, and vector drawings ({\p1}m 0 0 l ...) carry
+        # no words at all. Neither deserves its own model call. Send each distinct
+        # text-bearing string once, then fan the answer back out to every occurrence;
+        # cues with nothing to translate are copied through untouched.
+        # (Rosario to Vampire E03: 44,472 events → 382 unique strings → 20 chunks
+        # instead of 2,224.)
+        translatable, duplicates, passthrough = _plan_translation_units(entries)
+        translated: dict[int, str] = {
+            e["index"]: e["text"] for e in entries if e["index"] in passthrough
+        }
+
+        if not translatable:
+            chunks: list[list[dict]] = []
+        else:
+            chunks = _chunk_entries(translatable, self.chunk_size, self.chunk_overlap)
         repairs = 0
+        self._api_calls = 0
 
         for ci, chunk in enumerate(chunks):
             if cancel_check and cancel_check():
@@ -156,18 +171,25 @@ class Translator:
             if on_progress:
                 on_progress(ci + 1, len(chunks))
 
-            parsed, repaired = self._translate_chunk_verified(chunk, source_lang, target_lang)
-            if repaired:
+            calls_before = self._api_calls
+            parsed, reason = self._translate_chunk_verified(chunk, source_lang, target_lang)
+            if reason:
                 repairs += 1
                 import logging
                 logging.getLogger("subber").warning(
-                    "  Chunk %d/%d repaired: model returned a line count that did not "
-                    "match %d sent cues (merged/dropped/duplicated lines)",
-                    ci + 1, len(chunks), len(chunk),
+                    "  Chunk %d/%d repaired: %s (%d cues, %d API call(s))",
+                    ci + 1, len(chunks), reason, len(chunk),
+                    self._api_calls - calls_before,
                 )
 
             for idx, text in parsed.items():
                 translated[idx] = text
+
+        # Every repeated occurrence inherits the translation of the string it
+        # duplicates, so the written file keeps all of them.
+        for idx, rep in duplicates.items():
+            if rep in translated:
+                translated[idx] = translated[rep]
 
         # Last line of defence against a merge that preserved the line count: the
         # speaker labels tell us where the content really belongs, so re-translate
@@ -220,15 +242,24 @@ class Translator:
         if source_lang not in ("en", "eng", "english"):
             leftover = [
                 e for e in entries
-                if e["index"] not in translated
-                or _still_source_lang(translated[e["index"]], source_lang)
+                if e["index"] not in passthrough
+                and (
+                    e["index"] not in translated
+                    or _still_source_lang(translated[e["index"]], source_lang)
+                )
             ]
-            if leftover:
+            # Batch this: a whole file's worth of leftovers in one request is a
+            # 40k-character prompt the provider rejects (and a file with no usable
+            # chunk response would land every cue here at once).
+            for start in range(0, len(leftover), max(1, self.chunk_size)):
+                batch = leftover[start:start + max(1, self.chunk_size)]
                 try:
-                    retry_text = self._translate_chunk(leftover, source_lang, target_lang)
+                    retry_text = self._translate_chunk(batch, source_lang, target_lang)
                     for idx, text in _parse_numbered_response(retry_text).items():
                         if not _still_source_lang(text, source_lang):
                             translated[idx] = text
+                except TranslationCancelled:
+                    raise
                 except Exception:
                     pass  # retry is best-effort — keep the main-pass results
 
@@ -242,16 +273,24 @@ class Translator:
             "anchor_desyncs": anchor_windows,
             "anchor_repaired": anchor_fixed,
             "chunks": len(chunks),
+            "unique_cues": len(translatable),
+            "duplicate_cues": len(duplicates),
+            "passthrough_cues": len(passthrough),
+            "api_calls": self._api_calls,
         })
         import logging
         logging.getLogger("subber").info(
             "  QA: %d cues · %d empty · %d label-only · %d sound-cue-only · "
             "%d untranslated · longest %d chars · %d/%d chunks repaired · "
-            "%d label-drift · %d dialogue · %d anchor-shift (%d cues)",
+            "%d label-drift · %d dialogue · %d anchor-shift (%d cues) · "
+            "%d unique of %d cues sent (%d repeats, %d non-text passed through, "
+            "%d API calls)",
             self.last_qa["cues"], self.last_qa["empty"], self.last_qa["label_only"],
             self.last_qa["sound_cues"], self.last_qa["untranslated"],
             self.last_qa["longest_line"], repairs, len(chunks), repaired_cues,
             dialogue_fixed, anchor_windows, anchor_fixed,
+            len(translatable), self.last_qa["cues"], len(duplicates),
+            len(passthrough), self._api_calls,
         )
 
         # Learn this show's terminology from the pairs we just produced, so the
@@ -581,7 +620,7 @@ class Translator:
         chunk: list[dict],
         source_lang: str,
         target_lang: str,
-    ) -> tuple[dict[int, str], bool]:
+    ) -> tuple[dict[int, str], str]:
         """Translate one chunk and guarantee a line for every cue index it sent.
 
         A model that merges two cues into one line, drops a line or repeats a
@@ -591,8 +630,11 @@ class Translator:
         sent is retried once at temperature 0, then the stragglers are translated
         one line at a time — a single-line request cannot desync.
 
-        Returns (translations, repaired) where `repaired` is True when the first
-        response was unusable and a retry / per-line pass was needed.
+        Returns (translations, reason) where `reason` is an empty string when the
+        first response was usable and otherwise says what was actually wrong —
+        "N missing", "N unexpected", "N speaker-label drift". The old caller log
+        blamed a line-count mismatch for every repair, including the label-drift
+        ones, which sent two rounds of debugging at the wrong code path.
         """
         # Overlap cues were already translated as part of the previous chunk; they
         # are sent as context only. Letting the later chunk write them back would
@@ -602,7 +644,7 @@ class Translator:
         expected = [e["index"] for e in wanted]
 
         parsed: dict[int, str] = {}
-        repaired = False
+        first_reason = ""
         for attempt, temp in enumerate((None, 0.0)):
             raw = self._translate_chunk(
                 chunk, source_lang, target_lang,
@@ -613,9 +655,20 @@ class Translator:
             parsed = {i: t for i, t in got.items() if i in set(expected) and t.strip()}
             missing = [i for i in expected if i not in parsed]
             extra = set(got) - sent
-            if not missing and not extra and _labels_mismatch(wanted, parsed) == 0:
-                return parsed, repaired
-            repaired = True
+            drift = _labels_mismatch(wanted, parsed)
+            if not missing and not extra and drift == 0:
+                return parsed, first_reason
+
+            parts = []
+            if missing:
+                parts.append("%d missing" % len(missing))
+            if extra:
+                parts.append("%d unexpected" % len(extra))
+            if drift:
+                parts.append("%d speaker-label drift" % drift)
+            reason = ", ".join(parts) or "response rejected"
+            if not first_reason:
+                first_reason = reason
 
         for e in wanted:
             if e["index"] in parsed:
@@ -631,11 +684,13 @@ class Translator:
             except Exception:
                 continue  # keep whatever the chunk pass produced
 
-        return parsed, repaired
+        return parsed, first_reason
 
     def _call_api(self, messages: list[dict], temperature: float | None = None) -> str:
         """Call the LLM API with retry logic."""
         temp = self.temperature if temperature is None else temperature
+        # Counted so the per-chunk repair warning can show what the chunk cost.
+        self._api_calls = getattr(self, "_api_calls", 0) + 1
         # Detect translategemma models — they need the completion API, not chat
         is_translategemma = "translategemma" in self.model.lower()
         if is_translategemma:
@@ -867,6 +922,64 @@ def translate_subtitles_multi(
         input_path, output_path, source_lang, target_lang, on_progress,
         character_map=character_map,
     )
+ 
+ 
+# Override blocks ({\pos(...)}, {\p1}) and the ASS vector-drawing grammar a typeset
+# event is made of: {\p1}m 0 0 l 0 1 307 1 ... — coordinates, no language.
+_OVERRIDE_BLOCK_RE = re.compile(r"\{[^}]*\}")
+_VECTOR_CMD_RE = re.compile(r"^\s*[mnlbspc]\s*-?\d")
+# ONE letter is enough: a Chinese cue of a single character ("嗯") or a Japanese
+# "え？" is a whole line of dialogue. Requiring two letters silently left those in
+# the source language (caught by tests/test_multiscript_typeset.py).
+_WORD_RE = re.compile(r"[^\W\d_]", re.UNICODE)
+
+
+def _translation_key(text: str) -> str | None:
+    """Return a dedupe key for a cue worth translating, or None if it has no words.
+
+    Vector drawings, karaoke timing stubs and blank cues carry no language, and
+    typeset tracks repeat one string across dozens of animation frames (Rosario to
+    Vampire E03: 44,472 events, 382 distinct strings). Keying on the visible text
+    lets the caller translate each string once and still write every occurrence.
+    """
+    visible = _OVERRIDE_BLOCK_RE.sub("", text or "")
+    if _VECTOR_CMD_RE.match(visible):
+        return None
+    if not _WORD_RE.search(visible):
+        return None
+    return " ".join(visible.split()).casefold()
+
+
+def _plan_translation_units(
+    entries: list[dict],
+) -> tuple[list[dict], dict[int, int], set[int]]:
+    """Collapse a file's cues into the set that actually needs the model.
+
+    Returns (translatable, duplicates, passthrough):
+    - `translatable` — one representative cue per distinct text, in file order,
+    - `duplicates` — cue index → the index that carries its translation,
+    - `passthrough` — cue indices with nothing to translate (written back as-is).
+    """
+    translatable: list[dict] = []
+    first_seen: dict[str, int] = {}
+    duplicates: dict[int, int] = {}
+    passthrough: set[int] = set()
+
+    for e in entries:
+        key = _translation_key(e["text"])
+        if key is None:
+            passthrough.add(e["index"])
+            continue
+        rep = first_seen.get(key)
+        if rep is None:
+            first_seen[key] = e["index"]
+            translatable.append(e)
+        else:
+            duplicates[e["index"]] = rep
+
+    return translatable, duplicates, passthrough
+
+
 def _chunk_entries(
     entries: list[dict],
     chunk_size: int,

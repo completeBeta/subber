@@ -2,6 +2,37 @@
 
 All notable changes to Subber are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/), and this project versions with [SemVer](https://semver.org/).
 
+## [0.12.2] - 2026-11-02
+
+### Fixed
+- **Typeset subtitle tracks were translated frame by frame.** Dialogue filtering
+  keyed on the *style name* against an English word list (`sign`, `song`, `karaoke`,
+  …), so a fansub that names its sign styles in its own language fell through to the
+  "unknown style → assume dialogue" default. One 24-minute episode arrived with
+  44,472 events: 44,087 of them sign typesetting, of which 31,414 were pure vector
+  drawings (`{\p1}m 0 0 l …`) carrying no words and 12,673 were per-frame repeats of
+  eleven distinct strings. That planned 2,224 chunks, and every chunk of drawings
+  came back merged, so each one cost a retry plus a per-cue repair (~15–26 requests
+  per chunk) and the file never finished.
+  - `_filter_to_dialogue()` now classifies a style as **dialogue**, **sign** or
+    **unknown**; an unknown style is decided by its text — a vector drawing or a
+    wording-free stub is not dialogue.
+  - `translate()` translates **each distinct string once** and fans the result back
+    to every occurrence, and copies cues with nothing to translate straight through
+    (a one-character Chinese line still counts as language). The same episode now
+    plans 20 chunks and 22 API calls, and finishes in 68 s with a clean QA line.
+  - The "still in source language" retry is batched at chunk size instead of
+    resending a whole file in one request, and skips pass-through cues.
+
+### Changed
+- **Repair warnings say what actually went wrong.** The per-chunk warning reported
+  "line count did not match" for every repair, including the speaker-label-drift
+  ones; it now names the defect (`3 missing`, `1 unexpected`, `2 speaker-label
+  drift`) and the number of API calls the chunk cost.
+- The per-file QA line reports unique-vs-total cues, collapsed repeats,
+  pass-through cues and total API calls, so a typeset-heavy file is visible as a
+  number instead of a stall.
+
 ## [0.12.1] - 2026-10-28
 
 ### Fixed

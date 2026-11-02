@@ -1183,17 +1183,35 @@ def _filter_to_dialogue(sub_path: Path) -> Path | None:
         "opening", "ending", "edl", "edr",
     )
 
-    def _is_dialogue(style: str) -> bool:
+    def _classify_style(style: str) -> str:
+        """'dialogue', 'sign' (recognised non-dialogue) or 'unknown'."""
         s = style.lower().strip()
         if s in dialogue_styles:
-            return True
+            return "dialogue"
         for m in non_dialogue_markers:
             if m in s:
-                return False
+                return "sign"
         for token in s.replace("_", " ").replace("-", " ").split():
             if token in ("op", "ed"):
-                return False
-        return True
+                return "sign"
+        return "unknown"
+
+    # Style names are English and hand-listed, so a fansub that names its signs in
+    # its own language used to fall through to the old "unknown → dialogue" default.
+    # Rosario to Vampire E03 uses "Letreros" (Spanish for signs): 44,087 sign events
+    # passed the style test and became 2,224 chunks instead of 20. For an unknown
+    # name, decide from the text: a vector drawing ({\p1}m 0 0 l ...) or a
+    # wording-free stub is not dialogue, and neither is worth a model call.
+    override_re = re.compile(r"\{[^}]*\}")
+    vector_re = re.compile(r"^\s*[mnlbspc]\s*-?\d")
+    # One letter counts: a sign reading "P" or a one-character cue is language.
+    word_re = re.compile(r"[^\W\d_]", re.UNICODE)
+
+    def _has_words(text_field: str) -> bool:
+        visible = override_re.sub("", text_field)
+        if vector_re.match(visible):
+            return False
+        return bool(word_re.search(visible))
 
     kept = 0
     out: list[str] = []
@@ -1204,10 +1222,22 @@ def _filter_to_dialogue(sub_path: Path) -> Path | None:
                 out.append(line)  # malformed → keep rather than silently drop
                 continue
             style = parts[3].strip()
-            if style and _is_dialogue(style):
+            text_field = parts[9] if len(parts) > 9 else ""
+            if not style:
+                out.append(line)
+                continue
+            kind = _classify_style(style)
+            if kind == "dialogue":
                 out.append(line)
                 kept += 1
-            # else: drop sign/song/effect events
+            elif kind == "unknown" and _has_words(text_field):
+                # Unknown style name that carries real wording (a sign reading
+                # "Instituto Youkai", a chapter title): keep it — dropping it would
+                # lose on-screen text, and the translator dedupes the animation
+                # frames into one request. Recognised sign/song styles stay dropped.
+                out.append(line)
+                kept += 1
+            # else: drop sign/song/effect/drawing events
         else:
             out.append(line)  # keep [Script Info], [Styles], comments, etc.
 
