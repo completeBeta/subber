@@ -2,6 +2,30 @@
 
 All notable changes to Subber are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/), and this project versions with [SemVer](https://semver.org/).
 
+## [0.13.0] - 2026-11-07
+
+### Changed
+- **Explanatory microcopy moved into hover help.** The Search page stacked a
+  sentence under nearly every control — a helper line under the search box, one
+  beside Season/Episode, and a two-line paragraph under "Hide season packs" —
+  which made a four-field form read as a wall of text. Each explanation is now
+  behind a small ⓘ next to its label and appears on hover, on keyboard focus
+  (the icon is `tabindex="0"`) and on tap.
+  - The bubble is one `position: fixed` node, positioned from the icon's
+    bounding box and clamped to the viewport, so it cannot introduce horizontal
+    overflow — an absolutely positioned `::after` would have added 12 px of
+    scroll width at 390 px.
+  - Hover is handled on `pointerover`/`pointerout` filtered to
+    `pointerType === 'mouse'`; a touch tap also synthesises `mouseout` *after*
+    the tap, which would otherwise close the bubble it had just opened.
+  - The ⓘ sits outside the checkbox `<label>`, so tapping it explains the option
+    instead of toggling it.
+
+### Added
+- `base.html` now serves a reusable `#hover-tip` element and controller: any
+  element carrying `class="info-tip"` and a `data-tip` attribute gets the
+  behaviour, so later pages can use it without new CSS or JS.
+
 ## [0.12.2] - 2026-11-02
 
 ### Fixed

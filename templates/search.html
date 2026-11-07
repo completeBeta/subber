@@ -4,20 +4,21 @@
 {% block content %}
 <section class="search-card">
     <h2>Find Subtitles</h2>
-    <p class="sub" style="color: var(--text-muted); margin-bottom: 0.5rem;">
-        Search multiple subtitle providers
-    </p>
     <div class="rate-limit-badge" style="display: inline-block; margin-bottom: 1rem;">
-        Multi-provider search · Configure in <a href="/settings" style="color: var(--accent);">Settings</a>
+        Multi-provider · <a href="/settings" style="color: var(--accent);">Configure</a>
     </div>
 
     <div class="form-group">
-        <label>Search by name or video path</label>
+        <div style="display: flex; align-items: center;">
+            <label for="search-query" style="margin-bottom: 0.35rem;">Search by name or video path</label>
+            <span class="info-tip" tabindex="0" role="note"
+                  aria-label="Paste a video path for hash-based matching (more accurate). Type a show name for text search."
+                  data-tip="Paste a video path for hash-based matching (more accurate). Type a show name for text search.">i</span>
+        </div>
         <div class="search-form">
             <input type="text" id="search-query" placeholder="Show name or /path/to/video.mkv" onkeydown="if(event.key==='Enter')doSearch()">
             <button class="btn-search" onclick="doSearch()">Search</button>
         </div>
-        <div class="hint">Paste a video path for hash-based matching (more accurate). Type a show name for text search.</div>
     </div>
 
     <div class="form-group" id="season-episode-fields" style="margin-top: 1rem; display: flex; gap: 1rem; align-items: flex-end;">
@@ -29,15 +30,19 @@
             <label for="search-episode" style="display: block; margin-bottom: 0.3rem;">Episode</label>
             <input type="number" id="search-episode" min="1" placeholder="e.g. 3" style="width: 6rem;">
         </div>
-        <div class="hint" style="margin-bottom: 0.4rem;">Optional — narrows TV results to an exact episode.</div>
+        <span class="info-tip" tabindex="0" role="note" style="margin-bottom: 0.7rem;"
+              aria-label="Season and episode are optional — they narrow TV results to an exact episode."
+              data-tip="Season and episode are optional — they narrow TV results to an exact episode.">i</span>
     </div>
 
-    <div style="margin-top: 0.75rem;">
+    <div style="margin-top: 0.75rem; display: flex; align-items: center;">
         <label class="checkbox-label" for="search-hide-packs" style="margin-bottom: 0;">
             <input type="checkbox" id="search-hide-packs" onchange="setHidePacks(this.checked)">
             <span style="white-space: nowrap;">Hide season packs</span>
         </label>
-        <div class="hint" style="margin-top: 0.25rem;">Packs are grouped last by default. Ticking this drops them from the result list (it stays ticked for this browser).</div>
+        <span class="info-tip" tabindex="0" role="note"
+              aria-label="Packs are grouped last by default. Ticking this drops them from the result list, and the choice is remembered in this browser."
+              data-tip="Packs are grouped last by default. Ticking this drops them from the result list, and the choice is remembered in this browser.">i</span>
     </div>
 
     <div id="search-results" style="margin-top: 1.5rem;"></div>

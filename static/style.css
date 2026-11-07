@@ -357,6 +357,64 @@ h2 {
     color: var(--text-muted);
     margin-top: 0.25rem;
 }
+
+/* ── Hover-help ────────────────────────────────────────────────────────────
+   Explanatory microcopy lives behind a small ⓘ instead of sitting on the page.
+   The bubble is a single position:fixed node driven by JS (base.html) — a
+   fixed element contributes nothing to document scroll width, so a tooltip
+   can never introduce horizontal overflow on a phone the way an absolutely
+   positioned ::after does. */
+.info-tip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 1.1rem;
+    height: 1.1rem;
+    margin-left: 0.35rem;
+    border: 1px solid #3a3f52;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.04);
+    color: #a8b0c6;
+    font-size: 0.62rem;
+    font-weight: 700;
+    line-height: 1;
+    cursor: help;
+    vertical-align: middle;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+}
+.info-tip:hover, .info-tip:focus-visible {
+    color: var(--accent);
+    border-color: var(--accent);
+    outline: none;
+}
+#hover-tip {
+    position: fixed;
+    left: 0;
+    top: 0;
+    z-index: 60;
+    max-width: min(18rem, calc(100vw - 1.5rem));
+    padding: 0.45rem 0.6rem;
+    background: #171a22;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.5);
+    font-size: 0.72rem;
+    font-weight: 400;
+    line-height: 1.45;
+    text-align: left;
+    white-space: normal;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 0.12s ease;
+}
+#hover-tip.show {
+    opacity: 1;
+    visibility: visible;
+}
 .btn-save {
     background: var(--accent);
     color: #fff;

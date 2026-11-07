@@ -158,8 +158,11 @@ Search all enabled providers by show name or video path, and download a specific
 **Controls:**
 - **Search box** — type a show name (text search) or paste a video path (hash-based matching, more accurate)
 - **Season / Episode** (optional) — narrow TV results to an exact episode
+- **Hide season packs** — pack results are grouped last by default; ticking this drops them from the list (remembered in the browser)
 - **Search** — run the query across providers
 - **Download** (per result) — fetch that subtitle file
+
+Controls carry a small ⓘ where there is more to explain than fits on the label; hover, focus or tap it to see the detail.
 
 ### 📋 Logs
 Real-time log viewer with filtering and export.
